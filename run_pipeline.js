@@ -11,11 +11,12 @@ async function main() {
 
     const startTime = performance.now();
     const isReviewedOnly = process.argv.includes('--reviewed');
+    const isVerbose = process.argv.includes('--verbose');
     
     const logFilePath = path.join(__dirname, 'pipeline_run.log');
     // Initialize log file
     fs.writeFileSync(logFilePath, `=== PIPELINE RUN LOG - ${new Date().toISOString()} ===\n`);
-    fs.appendFileSync(logFilePath, `Mode: ${isReviewedOnly ? 'TARGETED (15 REVIEWED IDs)' : 'ALL PUBLISHED PROPERTIES'}\n`);
+    fs.appendFileSync(logFilePath, `Mode: ${isReviewedOnly ? 'TARGETED (15 REVIEWED IDs)' : 'ALL PUBLISHED PROPERTIES'} (Verbose: ${isVerbose})\n`);
     fs.appendFileSync(logFilePath, "=".repeat(80) + "\n\n");
 
     const connection = await mysql.createConnection({
@@ -121,7 +122,13 @@ async function main() {
                     ""
                 ].join('\n');
 
-                logEntries.push({ id: prop.id, entry: logEntry });
+                logEntries.push({ 
+                    id: prop.id, 
+                    entry: logEntry,
+                    rawCount: rawWordCount,
+                    cleanedCount: cleanedWordCount,
+                    finalCount: finalWordCount
+                });
 
                 try {
                     await connection.execute(
@@ -141,7 +148,11 @@ async function main() {
             // Print logs sequentially so they don't interleave in the terminal
             logEntries.sort((a, b) => a.id - b.id).forEach(item => {
                 fs.appendFileSync(logFilePath, item.entry);
-                console.log(item.entry);
+                if (isVerbose) {
+                    console.log(item.entry);
+                } else {
+                    console.log(`Row ID: ${item.id.toString().padEnd(5)} | Words: ${item.rawCount.toString().padStart(4)} (raw) -> ${item.cleanedCount.toString().padStart(4)} (cleaned) -> ${item.finalCount.toString().padStart(4)} (final)`);
+                }
             });
 
             console.log(`[PROGRESS] Processed ${Math.min(i + BATCH_SIZE, properties.length)} / ${properties.length} rows...`);
