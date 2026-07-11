@@ -28,9 +28,18 @@ async function main() {
 
     try {
         let query = '';
-        const targetIds = [3382, 4785, 2836, 469, 4914, 1986, 1784, 573, 1670, 5346, 1671, 3573, 6483, 4561, 6347];
+        let targetIds = [3382, 4785, 2836, 469, 4914, 1986, 1784, 573, 1670, 5346, 1671, 3573, 6483, 4561, 6347];
 
         if (isReviewedOnly) {
+            const problemsJsonPath = path.join(__dirname, '../scratch/reviewer_problems.json');
+            if (fs.existsSync(problemsJsonPath)) {
+                try {
+                    const problems = JSON.parse(fs.readFileSync(problemsJsonPath, 'utf8'));
+                    targetIds = problems.map(p => p.id);
+                } catch (e) {
+                    console.error("Failed to parse reviewer_problems.json, falling back to hardcoded IDs:", e.message);
+                }
+            }
             console.log(`Running in TARGETED mode for the ${targetIds.length} reviewed property IDs.`);
             query = `SELECT id, frontend_overview FROM properties WHERE id IN (${targetIds.join(',')})`;
         } else {
@@ -51,6 +60,7 @@ async function main() {
 
         for (let i = 0; i < properties.length; i += BATCH_SIZE) {
             const chunk = properties.slice(i, i + BATCH_SIZE);
+            const logEntries = [];
 
             const promises = chunk.map(async (prop) => {
                 const rawText = prop.frontend_overview;
@@ -96,20 +106,31 @@ async function main() {
                     return; // Skip completely empty/null rows from updating
                 }
 
+                // Helper to limit text to a specific word count in logs
+                const limitWords = (str, limit) => {
+                    if (!str) return '';
+                    const words = str.split(/\s+/).filter(w => w.length > 0);
+                    if (words.length <= limit) return str;
+                    return words.slice(0, limit).join(' ') + '... [truncated in log]';
+                };
+
+                const loggedRaw = limitWords(rawText, 200);
+                const loggedCleaned = limitWords(cleanedBeforeTruncation, 200);
+
                 // Write detailed side-by-side transformation log
                 const logEntry = [
                     `Row ID: ${prop.id}`,
                     `Raw Word Count:       ${rawWordCount}`,
                     `Cleaned Word Count:   ${cleanedWordCount}`,
                     `Truncated Word Count: ${finalWordCount}`,
-                    `[RAW TEXT]:\n${rawText}`,
-                    `[CLEANED TEXT]:\n${cleanedBeforeTruncation || '(SKIPPED/EMPTY)'}`,
+                    `[RAW TEXT]:\n${loggedRaw}`,
+                    `[CLEANED TEXT]:\n${loggedCleaned || '(SKIPPED/EMPTY)'}`,
                     `[FINAL TRUNCATED TEXT]:\n${targetText}`,
                     "-".repeat(80),
                     ""
                 ].join('\n');
 
-                fs.appendFileSync(logFilePath, logEntry);
+                logEntries.push({ id: prop.id, entry: logEntry });
 
                 try {
                     await connection.execute(
@@ -125,6 +146,13 @@ async function main() {
             });
 
             await Promise.all(promises);
+
+            // Print logs sequentially so they don't interleave in the terminal
+            logEntries.sort((a, b) => a.id - b.id).forEach(item => {
+                fs.appendFileSync(logFilePath, item.entry);
+                console.log(item.entry);
+            });
+
             console.log(`[PROGRESS] Processed ${Math.min(i + BATCH_SIZE, properties.length)} / ${properties.length} rows...`);
         }
 

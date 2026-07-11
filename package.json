@@ -1,0 +1,16 @@
+{
+  "name": "regex-script",
+  "version": "1.0.0",
+  "description": "Text sanitization and truncation pipeline for real estate voiceovers",
+  "main": "run_pipeline.js",
+  "scripts": {
+    "pipeline": "node run_pipeline.js",
+    "reviewed": "node run_pipeline.js --reviewed",
+    "populate": "node populate_staging_column.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "mysql2": "^3.11.0",
+    "written-number": "^0.11.1"
+  }
+}

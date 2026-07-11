@@ -18,10 +18,10 @@ function convertNumberToWords(num) {
     if (nStr.includes('.')) {
         const parts = nStr.split('.');
         const intPart = parseInt(parts[0], 10);
-        const intWords = isNaN(intPart) ? '' : (intPart === 0 ? 'zero' : writtenNumber(intPart, { noAnd: true }));
+        const intWords = isNaN(intPart) ? '' : (intPart === 0 ? 'zero' : writtenNumber(intPart));
         const decWords = parts[1].split('').map(d => {
             const digit = parseInt(d, 10);
-            return isNaN(digit) ? '' : (digit === 0 ? 'zero' : writtenNumber(digit, { noAnd: true }));
+            return isNaN(digit) ? '' : (digit === 0 ? 'zero' : writtenNumber(digit));
         }).filter(w => w !== '').join(' ');
         
         let result = '';
@@ -33,7 +33,7 @@ function convertNumberToWords(num) {
     const val = parseInt(nStr, 10);
     if (isNaN(val)) return '';
     if (val === 0) return 'zero';
-    return writtenNumber(val, { noAnd: true }).replace(/-/g, ' ');
+    return writtenNumber(val).replace(/-/g, ' ');
 }
 
 /**
@@ -83,13 +83,23 @@ function ordinalToWords(numStr) {
 function isTitleCaseHeading(line) {
     const l = line.trim();
     if (l.length === 0) return false;
-    const words = l.split(/\s+/).filter(w => w.length > 0);
+    
+    // If it contains bedroom/bathroom/size specs (e.g. 3 Beds, 2 Baths or 3 bedrooms), do not strip it
+    if (/\b\d+\s*(?:bed|bath|br|ba|sq?\.?\s*ft|sqft|square|room)/i.test(l)) {
+        return false;
+    }
+
+    const words = l.split(/\s+/)
+        .map(w => w.replace(/[^a-zA-Z]/g, ''))
+        .filter(w => w.length > 0);
+    if (words.length === 0) return false;
     if (words.length > 12) return false;
-    const hasDigits = /\d/.test(l);
+
     const hasSentenceEndingPunc = /[.!?]$/.test(l);
     const capWords = words.filter(w => /^[A-Z]/.test(w));
-    const isCapitalized = words.length > 0 && (capWords.length / words.length) >= 0.5;
-    return !hasDigits && !hasSentenceEndingPunc && isCapitalized;
+    const isCapitalized = (capWords.length / words.length) >= 0.5;
+
+    return !hasSentenceEndingPunc && isCapitalized;
 }
 
 /**
@@ -173,7 +183,7 @@ function cleanTextForTTS(rawText) {
 
     // 0d: Remove inline ALL-CAPS heading (allowing common punctuation and pipe symbols)
     // 3+ consecutive ALL-CAPS words at string start, no period between heading and body
-    const allCapsRegex = /^([A-Z0-9'’"“”&|/–-]+(?![a-z])(?:\s+[A-Z0-9'’"“”&|/–-]+(?![a-z])){2,})/g;
+    const allCapsRegex = /^([A-Z0-9'’"“”&|/–,-]+(?![a-z])(?:\s+[A-Z0-9'’"“”&|/–,-]+(?![a-z])){2,})/g;
     const allCapsMatch = t.match(allCapsRegex);
     if (allCapsMatch) {
         const heading = allCapsMatch[0];
@@ -190,6 +200,7 @@ function cleanTextForTTS(rawText) {
         if (preservedAcronyms.has(match)) return match;
         return match.toLowerCase();
     });
+    t = t.replace(/\b[A-HJ-Z]\b/g, (match) => match.toLowerCase());
 
     // 0f: Handle structural line breaks/bullet points by ensuring sentence punctuation
     t = t.split(/[\r\n]+/)
@@ -203,8 +214,8 @@ function cleanTextForTTS(rawText) {
         .join(' ');
 
     // --- PHASE B: Early Cleanups & Abbreviation Expansion ---
-    // Normalize smart punctuation early
-    t = t.replace(/’|‘/g, "'").replace(/”|“/g, '"');
+    // Normalize smart punctuation early (including prime and double prime symbols)
+    t = t.replace(/’|‘/g, "'").replace(/”|“/g, '"').replace(/′/g, "'").replace(/″/g, '"');
 
     // Dimensions "by" replacement on raw digits/symbols (e.g. 51' x 26' -> 51' by 26')
     t = t.replace(/(\d+(?:\s*['"”]|ft|feet|in|inches)?)\s*[xX×]\s*(\d+)/g, '$1 by $2');
@@ -216,11 +227,20 @@ function cleanTextForTTS(rawText) {
     // SF / -SF / S.F. -> square feet / -square feet
     t = t.replace(/(-\s*)?\b(?:SF|S\.F\.)\b/gi, (match, hyphen) => hyphen ? '-square feet' : 'square feet');
     
-    // Sq -> Square
-    t = t.replace(/\bSq\b/g, 'Square').replace(/\bsq\b/g, 'square');
-    
-    // FT -> Feet
-    t = t.replace(/\bFT\b/g, 'Feet').replace(/\bft\b/g, 'feet');
+    // Replace pipe symbols with a comma
+    t = t.replace(/\s*\|\s*/g, ', ');
+
+    // Spacing around word-bound hyphens (e.g. jaw- dropping -> jaw-dropping)
+    t = t.replace(/\b([a-zA-Z]+)-\s+([a-zA-Z]+)\b/g, '$1-$2');
+
+    // Add space after comma if between two letters (e.g. services,a -> services, a)
+    t = t.replace(/([a-zA-Z]),([a-zA-Z])/g, '$1, $2');
+
+    // Expand circa abbreviations followed by a year (e.g. c.1901 -> circa 1901)
+    t = t.replace(/\bca?\.\s*(\d{4})\b/gi, 'circa $1');
+
+    // Ensure consistent pronunciation of Miele (e.g. Mee-luh)
+    t = t.replace(/\bMiele\b/gi, 'Mee-luh');
 
     // BR / BRs -> bedrooms
     t = t.replace(/\bBRs?\b/g, 'bedrooms').replace(/\bbrs?\b/g, 'bedrooms');
@@ -243,6 +263,9 @@ function cleanTextForTTS(rawText) {
     t = t.replace(/\bandpermit-ready\b/gi, 'and permit-ready');
     t = t.replace(/\bCentral ParkSightlines\b/gi, 'Central Park Sightlines');
     t = t.replace(/\bPH([A-Z][a-z]+)\b/g, 'PH $1');
+    t = t.replace(/\bandriver\b/gi, 'and river');
+    t = t.replace(/\bsprawlingnorth\b/gi, 'sprawling north');
+    t = t.replace(/\belegantcoffered\b/gi, 'elegant coffered');
 
     // --- PHASE C: Number Conversion ---
     
@@ -274,6 +297,12 @@ function cleanTextForTTS(rawText) {
             }
         }
         return spoken;
+    });
+
+    // Convert decimal .5 baths to "and a half" (e.g. 4.5 bathrooms -> four and a half bathrooms)
+    t = t.replace(/\b(\d+)\.5\s*(baths?|bathrooms?)\b/gi, (match, num, unit) => {
+        const words = convertNumberToWords(num);
+        return `${words} and a half ${unit}`;
     });
 
     // Pre-process non-currency numbers with commas (e.g. 2,000 sq ft or 2,482)
@@ -325,6 +354,12 @@ function cleanTextForTTS(rawText) {
     t = t.replace(/\baves\b\.?/gi, 'avenues');
     t = t.replace(/\bCPW\b/g, 'Central Park West');
     t = t.replace(/\bRSD\b/g, 'Riverside Drive');
+
+    // Sq -> Square (done late to avoid breaking sq.ft. matches)
+    t = t.replace(/\bSq\b/g, 'Square').replace(/\bsq\b/g, 'square');
+    
+    // FT -> Feet (done late to avoid breaking ft matches)
+    t = t.replace(/\bFT\b/g, 'Feet').replace(/\bft\b/g, 'feet');
     
     // Expand Penthouse configurations cleanly (e.g., PH6A -> Penthouse Six A)
     t = t.replace(/\bPH(\d+)([A-Za-z]?)\b/gi, (m, num, letter) => {
@@ -367,6 +402,9 @@ function cleanTextForTTS(rawText) {
     // Note: Semicolons and commas are PRESERVED for natural TTS pacing and voice pauses.
     t = t.replace(/[\t\r\n]+/g, ' '); // Flatten structural formatting breaks
     t = t.replace(/\s+/g, ' ');        // Condense spaces
+
+    // Capitalize the first letter of each sentence
+    t = t.replace(/(^\s*|[.!?]\s+)([a-z])/g, (match, prefix, char) => prefix + char.toUpperCase());
 
     return t.trim();
 }
