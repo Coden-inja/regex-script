@@ -1,10 +1,9 @@
 require('dotenv').config();
 const mysql = require('mysql2/promise');
-const { cleanTextForTTS } = require('./text_sanitizer');
 
 async function main() {
     console.log("================================================================================");
-    console.log("DATABASE STAGING COLUMN POPULATOR (CONCURRENT BATCHED - MYSQL2)");
+    console.log("DATABASE TTS TEXT TRUNCATOR (CONCURRENT BATCHED - MYSQL2)");
     console.log("================================================================================");
 
     const startTime = performance.now();
@@ -18,14 +17,16 @@ async function main() {
     });
 
     try {
-        console.log("Querying database for rows with missing tts_clean_overview staging data...");
+        console.log("Querying database for rows with non-empty tts_clean_overview to truncate...");
 
-        // Query properties where is_published = 1 and tts_clean_overview is NULL
         const [properties] = await connection.execute(
-            'SELECT id, frontend_overview FROM properties WHERE is_published = 1 AND tts_clean_overview IS NULL'
+            `SELECT id, tts_clean_overview FROM properties 
+             WHERE tts_clean_overview IS NOT NULL 
+               AND tts_clean_overview != '' 
+               AND tts_clean_overview != 'SKIPPED_LEGAL_BOILERPLATE'`
         );
 
-        console.log(`Fetched ${properties.length} published rows to process.`);
+        console.log(`Fetched ${properties.length} rows to evaluate.`);
         console.log("-".repeat(80));
 
         let processedCount = 0;
@@ -39,33 +40,45 @@ async function main() {
             const chunk = properties.slice(i, i + BATCH_SIZE);
 
             const promises = chunk.map(async (prop) => {
-                const rawText = prop.frontend_overview;
-                let targetText = 'SKIPPED_LEGAL_BOILERPLATE';
+                const text = prop.tts_clean_overview;
+                const words = text.split(/\s+/).filter(w => w.length > 0);
 
-                if (rawText && rawText !== 'null') {
-                    const cleaned = cleanTextForTTS(rawText);
-                    if (cleaned !== null) {
-                        targetText = cleaned;
-                    } else {
-                        skippedCount++;
-                    }
+                if (words.length <= 150) {
+                    skippedCount++;
+                    return; // Skip rows that are already <= 150 words
+                }
+
+                let truncatedText = '';
+                const windowWords = words.slice(0, 172);
+                const windowText = windowWords.join(' ');
+
+                const lastPuncIndex = Math.max(
+                    windowText.lastIndexOf('.'),
+                    windowText.lastIndexOf('!'),
+                    windowText.lastIndexOf('?')
+                );
+
+                if (lastPuncIndex !== -1) {
+                    truncatedText = windowText.substring(0, lastPuncIndex + 1).trim();
                 } else {
-                    return; // Skip completely empty/null rows from updating
+                    // If no punctuation found, hard-cut at 150 words + append '.'
+                    truncatedText = words.slice(0, 150).join(' ') + '.';
                 }
 
                 try {
                     await connection.execute(
                         'UPDATE properties SET tts_clean_overview = ? WHERE id = ?',
-                        [targetText, prop.id]
+                        [truncatedText, prop.id]
                     );
                     processedCount++;
 
-                    // Capture a few samples of successful non-skipped updates
-                    if (targetText !== 'SKIPPED_LEGAL_BOILERPLATE' && samples.length < 3) {
+                    if (samples.length < 3) {
                         samples.push({
                             id: prop.id,
-                            raw: rawText.substring(0, 150) + (rawText.length > 150 ? '...' : ''),
-                            cleaned: targetText.substring(0, 150) + (targetText.length > 150 ? '...' : '')
+                            originalWordCount: words.length,
+                            truncatedWordCount: truncatedText.split(/\s+/).filter(w => w.length > 0).length,
+                            original: text.substring(0, 150) + '...',
+                            truncated: truncatedText
                         });
                     }
                 } catch (err) {
@@ -74,37 +87,37 @@ async function main() {
                 }
             });
 
-            // Wait for the concurrent batch of updates to complete
             await Promise.all(promises);
 
-            console.log(`[PROGRESS] Processed ${Math.min(i + BATCH_SIZE, properties.length)} / ${properties.length} rows...`);
+            console.log(`[PROGRESS] Evaluated ${Math.min(i + BATCH_SIZE, properties.length)} / ${properties.length} rows...`);
         }
 
         const endTime = performance.now();
         const totalDurationMs = endTime - startTime;
 
         console.log("\n================================================================================");
-        console.log("STAGING RUN METRICS");
+        console.log("TRUNCATION RUN METRICS");
         console.log("================================================================================");
-        console.log(`Total Rows Found:          ${properties.length}`);
-        console.log(`Successfully Populated:    ${processedCount}`);
-        console.log(`Boilerplate Skips:         ${skippedCount}`);
+        console.log(`Total Rows Evaluated:      ${properties.length}`);
+        console.log(`Successfully Truncated:    ${processedCount}`);
+        console.log(`Already <= 150 (Skipped):  ${skippedCount}`);
         console.log(`Errors Encountered:        ${errorCount}`);
         console.log(`Total Elapsed Time:        ${(totalDurationMs / 1000).toFixed(4)} seconds`);
         console.log("================================================================================");
 
         if (samples.length > 0) {
-            console.log("\n=== SUCCESSFUL UPDATE SAMPLES (VERIFICATION PASS) ===");
+            console.log("\n=== TRUNCATION SAMPLES (VERIFICATION PASS) ===");
             samples.forEach((sample, index) => {
                 console.log(`\nSample #${index + 1} - [ID ${sample.id}]`);
-                console.log(`  Raw Text:     "${sample.raw}"`);
-                console.log(`  Cleaned Text: "${sample.cleaned}"`);
+                console.log(`  Original Word Count:  ${sample.originalWordCount}`);
+                console.log(`  Truncated Word Count: ${sample.truncatedWordCount}`);
+                console.log(`  Truncated Content:    "${sample.truncated}"`);
             });
             console.log("================================================================================");
         }
 
     } catch (error) {
-        console.error("Staging populator script encountered a critical error:", error);
+        console.error("Truncator script encountered a critical error:", error);
     } finally {
         await connection.end();
     }
