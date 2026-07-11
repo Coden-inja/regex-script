@@ -551,11 +551,16 @@ function cleanTextForTTS(rawText) {
     t = t.replace(/\bandriver\b/gi, 'and river');
     t = t.replace(/\bsprawlingnorth\b/gi, 'sprawling north');
     t = t.replace(/\belegantcoffered\b/gi, 'elegant coffered');
+    t = t.replace(/\bfurtherthrough\b/gi, 'further through');
+
+    // Generic CamelCase splitting for merged words (e.g., intoCentral -> into Central, PHDesign -> PH Design)
+    t = t.replace(/([a-zA-Z])([A-Z][a-z]+)/g, '$1 $2');
 
     // --- PHASE C: Number Conversion & Grouping ---
 
     // 1. Specific BR/BA slash splay (e.g. 2BR/2BA, 3bed/2.5bath) before general slashes
-    t = t.replace(/\b(\d+)\s*(?:BR|br|bed|bedroom)s?\s*[\/,-]\s*(\d+(?:\.5)?)\s*(?:BA|ba|bath|bathroom)s?\b/gi, (match, br, ba) => {
+    // Use [/-] as the separator to avoid incorrectly matching comma-separated bedroom/bathroom lists
+    t = t.replace(/\b(\d+)\s*(?:BR|br|bed|bedroom)s?\s*[\/-]\s*(\d+(?:\.5)?)\s*(?:BA|ba|bath|bathroom)s?\b/gi, (match, br, ba) => {
         const brWord = convertNumberToWords(br) + ' bedroom';
         let baWord = '';
         if (ba.endsWith('.5')) {
@@ -724,7 +729,18 @@ function cleanTextForTTS(rawText) {
     t = t.replace(/\b\d+\b/g, (num) => convertNumberToWords(num));
 
     // --- PHASE E: CSV Clean & Sanitation (Step 7) ---
-    // Note: Semicolons and commas are PRESERVED for natural TTS pacing and voice pauses.
+    // Drop structural flow punctuation (commas and semicolons) by converting to space as requested
+    t = t.replace(/[,;]/g, ' ');
+
+    // Clean up multiple periods, e.g. "..." or ".." -> "."
+    t = t.replace(/\.{2,}/g, '.');
+
+    // Ensure space after sentence-ending punctuation followed by a letter, and capitalize it
+    t = t.replace(/([.!?])([a-zA-Z])/g, (match, punc, letter) => `${punc} ${letter.toUpperCase()}`);
+
+    // Clean up space before sentence-ending punctuation
+    t = t.replace(/\s+([.!?])/g, '$1');
+
     t = t.replace(/[\t\r\n]+/g, ' '); // Flatten structural formatting breaks
     t = t.replace(/\s+/g, ' ');        // Condense spaces
 

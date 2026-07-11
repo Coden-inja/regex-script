@@ -39,7 +39,7 @@ async function main() {
             query = 'SELECT id, frontend_overview FROM properties WHERE is_published = 1';
         }
 
-        const [properties] = await connection.execute(query);
+        const [properties] = await connection.query(query);
         console.log(`Fetched ${properties.length} rows from the database.`);
         console.log(`Logs will be written to: ${logFilePath}`);
         console.log("-".repeat(80));
@@ -54,96 +54,107 @@ async function main() {
             const chunk = properties.slice(i, i + BATCH_SIZE);
             const logEntries = [];
 
-            const promises = chunk.map(async (prop) => {
-                const rawText = prop.frontend_overview;
-                let targetText = 'SKIPPED_LEGAL_BOILERPLATE';
-                let cleanedBeforeTruncation = '';
-                let rawWordCount = 0;
-                let cleanedWordCount = 0;
-                let finalWordCount = 0;
+            // Start transaction for this batch to drastically speed up writes
+            await connection.beginTransaction();
 
-                if (rawText && rawText !== 'null') {
-                    rawWordCount = rawText.split(/\s+/).filter(w => w.length > 0).length;
-                    const cleaned = cleanTextForTTS(rawText);
+            try {
+                const promises = chunk.map(async (prop) => {
+                    const rawText = prop.frontend_overview;
+                    let targetText = 'SKIPPED_LEGAL_BOILERPLATE';
+                    let cleanedBeforeTruncation = '';
+                    let rawWordCount = 0;
+                    let cleanedWordCount = 0;
+                    let finalWordCount = 0;
 
-                    if (cleaned !== null) {
-                        cleanedBeforeTruncation = cleaned;
-                        cleanedWordCount = cleaned.split(/\s+/).filter(w => w.length > 0).length;
+                    if (rawText && rawText !== 'null') {
+                        rawWordCount = rawText.split(/\s+/).filter(w => w.length > 0).length;
+                        const cleaned = cleanTextForTTS(rawText);
 
-                        // Perform truncation logic
-                        const words = cleaned.split(/\s+/).filter(w => w.length > 0);
-                        if (words.length <= 150) {
-                            targetText = cleaned;
-                        } else {
-                            const windowWords = words.slice(0, 172);
-                            const windowText = windowWords.join(' ');
+                        if (cleaned !== null) {
+                            cleanedBeforeTruncation = cleaned;
+                            cleanedWordCount = cleaned.split(/\s+/).filter(w => w.length > 0).length;
 
-                            const lastPuncIndex = Math.max(
-                                windowText.lastIndexOf('.'),
-                                windowText.lastIndexOf('!'),
-                                windowText.lastIndexOf('?')
-                            );
-
-                            if (lastPuncIndex !== -1) {
-                                targetText = windowText.substring(0, lastPuncIndex + 1).trim();
+                            // Perform truncation logic
+                            const words = cleaned.split(/\s+/).filter(w => w.length > 0);
+                            if (words.length <= 150) {
+                                targetText = cleaned;
                             } else {
-                                targetText = words.slice(0, 150).join(' ') + '.';
+                                const windowWords = words.slice(0, 172);
+                                const windowText = windowWords.join(' ');
+
+                                const lastPuncIndex = Math.max(
+                                    windowText.lastIndexOf('.'),
+                                    windowText.lastIndexOf('!'),
+                                    windowText.lastIndexOf('?')
+                                );
+
+                                if (lastPuncIndex !== -1) {
+                                    targetText = windowText.substring(0, lastPuncIndex + 1).trim();
+                                } else {
+                                    targetText = words.slice(0, 150).join(' ') + '.';
+                                }
                             }
+                            finalWordCount = targetText.split(/\s+/).filter(w => w.length > 0).length;
+                        } else {
+                            skippedCount++;
                         }
-                        finalWordCount = targetText.split(/\s+/).filter(w => w.length > 0).length;
                     } else {
-                        skippedCount++;
+                        return; // Skip completely empty/null rows from updating
                     }
-                } else {
-                    return; // Skip completely empty/null rows from updating
-                }
 
-                // Helper to limit text to a specific word count in logs
-                const limitWords = (str, limit) => {
-                    if (!str) return '';
-                    const words = str.split(/\s+/).filter(w => w.length > 0);
-                    if (words.length <= limit) return str;
-                    return words.slice(0, limit).join(' ') + '... [truncated in log]';
-                };
+                    // Helper to limit text to a specific word count in logs
+                    const limitWords = (str, limit) => {
+                        if (!str) return '';
+                        const words = str.split(/\s+/).filter(w => w.length > 0);
+                        if (words.length <= limit) return str;
+                        return words.slice(0, limit).join(' ') + '... [truncated in log]';
+                    };
 
-                const loggedRaw = limitWords(rawText, 200);
-                const loggedCleaned = limitWords(cleanedBeforeTruncation, 200);
+                    const loggedRaw = limitWords(rawText, 200);
+                    const loggedCleaned = limitWords(cleanedBeforeTruncation, 200);
 
-                // Write detailed side-by-side transformation log
-                const logEntry = [
-                    `Row ID: ${prop.id}`,
-                    `Raw Word Count:       ${rawWordCount}`,
-                    `Cleaned Word Count:   ${cleanedWordCount}`,
-                    `Truncated Word Count: ${finalWordCount}`,
-                    `[RAW TEXT]:\n${loggedRaw}`,
-                    `[CLEANED TEXT]:\n${loggedCleaned || '(SKIPPED/EMPTY)'}`,
-                    `[FINAL TRUNCATED TEXT]:\n${targetText}`,
-                    "-".repeat(80),
-                    ""
-                ].join('\n');
+                    // Write detailed side-by-side transformation log
+                    const logEntry = [
+                        `Row ID: ${prop.id}`,
+                        `Raw Word Count:       ${rawWordCount}`,
+                        `Cleaned Word Count:   ${cleanedWordCount}`,
+                        `Truncated Word Count: ${finalWordCount}`,
+                        `[RAW TEXT]:\n${loggedRaw}`,
+                        `[CLEANED TEXT]:\n${loggedCleaned || '(SKIPPED/EMPTY)'}`,
+                        `[FINAL TRUNCATED TEXT]:\n${targetText}`,
+                        "-".repeat(80),
+                        ""
+                    ].join('\n');
 
-                logEntries.push({ 
-                    id: prop.id, 
-                    entry: logEntry,
-                    rawCount: rawWordCount,
-                    cleanedCount: cleanedWordCount,
-                    finalCount: finalWordCount
+                    logEntries.push({ 
+                        id: prop.id, 
+                        entry: logEntry,
+                        rawCount: rawWordCount,
+                        cleanedCount: cleanedWordCount,
+                        finalCount: finalWordCount
+                    });
+
+                    try {
+                        await connection.execute(
+                            'UPDATE properties SET tts_clean_overview = ? WHERE id = ?',
+                            [targetText, prop.id]
+                        );
+                        processedCount++;
+                    } catch (err) {
+                        errorCount++;
+                        console.error(`[ERROR] Failed to update row ID ${prop.id}:`, err.message);
+                        fs.appendFileSync(logFilePath, `[ERROR] Failed to update row ID ${prop.id}: ${err.message}\n\n`);
+                    }
                 });
 
-                try {
-                    await connection.execute(
-                        'UPDATE properties SET tts_clean_overview = ? WHERE id = ?',
-                        [targetText, prop.id]
-                    );
-                    processedCount++;
-                } catch (err) {
-                    errorCount++;
-                    console.error(`[ERROR] Failed to update row ID ${prop.id}:`, err.message);
-                    fs.appendFileSync(logFilePath, `[ERROR] Failed to update row ID ${prop.id}: ${err.message}\n\n`);
-                }
-            });
-
-            await Promise.all(promises);
+                await Promise.all(promises);
+                await connection.commit();
+            } catch (err) {
+                await connection.rollback();
+                errorCount += chunk.length;
+                console.error(`[ERROR] Transaction failed, rolling back batch:`, err.message);
+                fs.appendFileSync(logFilePath, `[ERROR] Transaction failed, rolled back batch: ${err.message}\n\n`);
+            }
 
             // Print logs sequentially so they don't interleave in the terminal
             logEntries.sort((a, b) => a.id - b.id).forEach(item => {
