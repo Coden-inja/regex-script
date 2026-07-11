@@ -31,15 +31,6 @@ async function main() {
         let targetIds = [3382, 4785, 2836, 469, 4914, 1986, 1784, 573, 1670, 5346, 1671, 3573, 6483, 4561, 6347];
 
         if (isReviewedOnly) {
-            const problemsJsonPath = path.join(__dirname, '../scratch/reviewer_problems.json');
-            if (fs.existsSync(problemsJsonPath)) {
-                try {
-                    const problems = JSON.parse(fs.readFileSync(problemsJsonPath, 'utf8'));
-                    targetIds = problems.map(p => p.id);
-                } catch (e) {
-                    console.error("Failed to parse reviewer_problems.json, falling back to hardcoded IDs:", e.message);
-                }
-            }
             console.log(`Running in TARGETED mode for the ${targetIds.length} reviewed property IDs.`);
             query = `SELECT id, frontend_overview FROM properties WHERE id IN (${targetIds.join(',')})`;
         } else {
