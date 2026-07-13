@@ -137,7 +137,7 @@ function isTitleCaseHeading(line) {
 }
 
 const brandPhonetics = [
-    { pattern: /\bSHoP\s+Architects\b/gi, replacement: 'S H O P Architects' },
+    { pattern: /\bSHoP\s+Architects\b/gi, replacement: 'Shop Architects' },
     { pattern: /\bMiele\b/gi, replacement: 'Mee-luh' },
     { pattern: /\bGaggenau\b/gi, replacement: 'Gah-guh-now' },
     { pattern: /\bSub-Zero\b/gi, replacement: 'Sub Zero' },
