@@ -137,7 +137,7 @@ function isTitleCaseHeading(line) {
 }
 
 const brandPhonetics = [
-    { pattern: /\bSHoP\s+Architects\b/gi, replacement: 'Shop Architects' },
+    { pattern: /\bSHoP\s+Architects\b/gi, replacement: 'S H O P Architects' },
     { pattern: /\bMiele\b/gi, replacement: 'Mee-luh' },
     { pattern: /\bGaggenau\b/gi, replacement: 'Gah-guh-now' },
     { pattern: /\bSub-Zero\b/gi, replacement: 'Sub Zero' },
@@ -164,8 +164,7 @@ const brandPhonetics = [
     { pattern: /\bSalvatori\b/gi, replacement: 'Sal-vuh-tor-ee' },
     { pattern: /\bCrema\s+d'Orcia\b/gi, replacement: 'Cray-muh Dor-chee-uh' },
     { pattern: /\bLa\s+Cornue\b/gi, replacement: 'Lah Cor-noo' },
-    { pattern: /\bCetraRuddy\b/gi, replacement: 'Set-ruh-rud-ee' },
-    { pattern: /\bCetraruddy\b/gi, replacement: 'Set-ruh-rud-ee' },
+    { pattern: /\bCetra\s*Ruddy\b/gi, replacement: 'Set-ruh-rud-ee' },
     { pattern: /\bFior\s+di\s+Bosco\b/gi, replacement: 'Fee-or dee Boss-co' },
     { pattern: /\bAgglo\s+Ceppo\b/gi, replacement: 'Ahg-lo Chep-o' },
     { pattern: /\bCeleste\s+Grigio\b/gi, replacement: 'Che-les-tay Gree-jo' },
@@ -344,12 +343,6 @@ const brandPhonetics = [
 ];
 
 const acronymReplacements = [
-    { pattern: /\bBBL\b/g, replacement: 'B-B-L' },
-    { pattern: /\bBAM\b/g, replacement: 'B-A-M' },
-    { pattern: /\bADA\b/g, replacement: 'A-D-A' },
-    { pattern: /\bNOI\b/g, replacement: 'N-O-I' },
-    { pattern: /\bLIRR\b/g, replacement: 'L-I-R-R' },
-    { pattern: /\bFAR\b/g, replacement: 'F-A-R' },
     { pattern: /\bSTAR\b/g, replacement: 'Star' },
     { pattern: /\bPILOT\b/g, replacement: 'Pilot' },
     { pattern: /\bLEED\b/g, replacement: 'Leed' },
@@ -358,23 +351,64 @@ const acronymReplacements = [
 
 /**
  * Main cleanTextForTTS function.
- * Pre-processes text for TTS vocalization.
+ * Pre-processes text for TTS vocalization using a 7-stage sequential pipeline.
  * Returns null if the text contains boilerplate and should be skipped.
  */
 function cleanTextForTTS(rawText) {
     if (!rawText) return '';
     let t = rawText;
 
-    // --- STEP 0: Safety Check (If human reviewers missed boilerplate, drop string execution context) ---
-    // Make sponsor match more robust based on observations
+    // ==========================================
+    // STAGE 1: Safety Check & Early Normalizations
+    // ==========================================
+    
+    // Safety check: Offering plan/Sponsor disclosures
     const boilerplateRisk = /offering plan|offering terms|equal housing|file no\.|file number|\bsponsor(?:\s*:|\s+is|\s+makes|\s+reverses|\s+available\s+from)/i;
     if (boilerplateRisk.test(t)) {
-        return null; // Return null so the caller knows to skip
+        return null; // Skip execution context
     }
 
-    // --- PHASE A: Heading & Boilerplate Removal ---
-    
-    // 0a: Strip known boilerplate openers
+    // Clean zero-width space characters early
+    t = t.replace(/\u200b/g, '');
+
+    // Normalize quotes, smart quotes, prime, double prime, and multiplication symbols early
+    t = t.replace(/""/g, '"');
+    t = t.replace(/’|‘/g, "'").replace(/”|“/g, '"').replace(/′/g, "'").replace(/″/g, '"');
+    t = t.replace(/×/g, 'x'); // Standardize multiplication symbol to 'x'
+    t = t.replace(/°/g, ' degree'); // Standardize degree symbol to 'degree'
+    t = t.replace(/\s*\+\s*[-–]\s*/g, ' more or less ');
+    t = t.replace(/\s*\+\s*\/\s*-\s*/g, ' more or less ');
+    t = t.replace(/\+/g, ' plus');
+    t = t.replace(/\bSHoP\b/g, 'Shop');
+
+    // Strip virtual staging disclaimers
+    t = t.replace(/\bPhotos\s+are\s+virtual(?:ly)?\s+staged\.?/gi, '');
+    t = t.replace(/\bSome\s+images\s+(?:have\s+been|are)\s+virtually\s+staged\.?/gi, '');
+    t = t.replace(/\bPhotos\s+virtually\s+furnished\.?/gi, '');
+    t = t.replace(/\bdigitally\s+(?:altered|enhanced)\.?/gi, '');
+
+    // Strip trailing spaces around hyphens in words (e.g., jaw- dropping -> jaw-dropping)
+    t = t.replace(/\b([a-zA-Z]+)-\s+(?!and\b)([a-zA-Z]+)\b/g, '$1-$2');
+
+    // Add space after comma if between two letters (e.g. services,a -> services, a)
+    t = t.replace(/([a-zA-Z]),([a-zA-Z])/g, '$1, $2');
+
+    // Typo corrections (common merged real estate terms)
+    t = t.replace(/\batelephone\b/gi, 'a telephone');
+    t = t.replace(/\bawayfrom\b/gi, 'away from');
+    t = t.replace(/\bandpermit-ready\b/gi, 'and permit-ready');
+    t = t.replace(/\bCentral ParkSightlines\b/gi, 'Central Park Sightlines');
+    t = t.replace(/\bPH([A-Z][a-z]+)\b/g, 'PH $1');
+    t = t.replace(/\bandriver\b/gi, 'and river');
+    t = t.replace(/\bsprawlingnorth\b/gi, 'sprawling north');
+    t = t.replace(/\belegantcoffered\b/gi, 'elegant coffered');
+    t = t.replace(/\bfurtherthrough\b/gi, 'further through');
+
+    // ==========================================
+    // STAGE 2: Heading & Line Break Normalization
+    // ==========================================
+
+    // Strip known boilerplate openers
     const boilerplateOpeners = [
         /^\s*Available for immediate occupancy[.,!?]*\s*/i,
         /^\s*Now available[.,!?]*\s*/i,
@@ -397,7 +431,7 @@ function cleanTextForTTS(rawText) {
         }
     }
 
-    // 0b: Strip short "Welcome to"/"Introducing"/"Presenting" (only if first sentence <= 6 words)
+    // Strip short Welcome to / Introducing / Presenting (first sentence <= 6 words)
     const firstSentenceMatch = t.match(/^([^.!?\n]|\.(?=\d))+(?:[.!?\n]+)?/);
     if (firstSentenceMatch) {
         const firstSentence = firstSentenceMatch[0];
@@ -414,8 +448,7 @@ function cleanTextForTTS(rawText) {
         }
     }
 
-    // 0c: Remove Title Case heading on its own line
-    // line must be <= 12 words, >= 50% capitalized words, no digits, no sentence-ending punctuation
+    // Remove Title Case heading on its own line (first lines)
     let firstLineChanged = true;
     while (firstLineChanged) {
         firstLineChanged = false;
@@ -426,7 +459,6 @@ function cleanTextForTTS(rawText) {
                 t = lines.slice(1).join('\n').trim();
                 firstLineChanged = true;
             } else if (isTitleCaseHeading(firstLine)) {
-                // Only strip if there is at least one line following that is NOT a title case heading
                 const hasBodyLine = lines.slice(1).some(line => line.trim().length > 0 && !isTitleCaseHeading(line));
                 if (hasBodyLine) {
                     t = lines.slice(1).join('\n').trim();
@@ -436,23 +468,28 @@ function cleanTextForTTS(rawText) {
         }
     }
 
-    // 0d: Remove inline ALL-CAPS heading (allowing common punctuation and pipe symbols)
-    // 3+ consecutive ALL-CAPS words at string start, no period between heading and body
+    // Remove inline ALL-CAPS heading only if it is on its own line or followed/contains a pipe symbol '|'
     const allCapsRegex = /^([A-Z0-9'’"“”&|/–,-]+(?![a-z])(?:\s+[A-Z0-9'’"“”&|/–,-]+(?![a-z])){2,})/g;
     const allCapsMatch = t.match(allCapsRegex);
     if (allCapsMatch) {
         const heading = allCapsMatch[0];
         const remaining = t.substring(heading.length);
         const remainingTrimmed = remaining.trim();
-        if (remainingTrimmed.length > 0 && !remainingTrimmed.startsWith('.')) {
-            t = remainingTrimmed;
+        const containsPipe = heading.includes('|') || remainingTrimmed.startsWith('|');
+        const isOwnLine = t.slice(heading.length).startsWith('\n') || t.slice(heading.length).startsWith('\r');
+        if (containsPipe || isOwnLine) {
+            let newText = remainingTrimmed;
+            if (newText.startsWith('|')) {
+                newText = newText.substring(1).trim();
+            }
+            t = newText;
         }
     }
 
-    // 0e: Standardize ALL-CAPS words to lowercase (except for preserved acronyms)
+    // Standardize ALL-CAPS words to lowercase (except preserved acronyms)
     const preservedAcronyms = new Set([
         'NYC', 'CPW', 'RSD', 'PH', 'AM', 'PM', 'AV', 'TV', 'CCNY', 'FAR', 'HVAC', 'UV', 'AIR',
-        'BBL', 'BAM', 'ADA', 'NOI', 'LIRR', 'STAR', 'PILOT', 'LEED', 'ZIP', 'FDR'
+        'BBL', 'BAM', 'ADA', 'NOI', 'LIRR', 'STAR', 'PILOT', 'LEED', 'ZIP', 'FDR', 'THG', 'IJ', 'LED'
     ]);
     t = t.replace(/\b[A-Z]{2,}\b/g, (match) => {
         if (preservedAcronyms.has(match)) return match;
@@ -460,7 +497,7 @@ function cleanTextForTTS(rawText) {
     });
     t = t.replace(/\b[A-HJ-Z]\b/g, (match) => match.toLowerCase());
 
-    // 0f: Handle structural line breaks/bullet points by ensuring sentence punctuation
+    // Handle structural line breaks/bullet points by ensuring sentence punctuation
     t = t.split(/[\r\n]+/)
         .map(line => {
             let l = line.trim();
@@ -471,22 +508,9 @@ function cleanTextForTTS(rawText) {
         })
         .join(' ');
 
-    // --- PHASE B: Early Cleanups, Unicode & Abbreviation Expansion ---
-    // Clean zero-width space characters early
-    t = t.replace(/\u200b/g, '');
-
-    // Normalize smart punctuation early (including prime and double prime symbols and double-double quotes)
-    t = t.replace(/""/g, '"');
-    t = t.replace(/’|‘/g, "'").replace(/”|“/g, '"').replace(/′/g, "'").replace(/″/g, '"');
-
-    // Strip virtual staging disclaimers
-    t = t.replace(/\bPhotos\s+are\s+virtual(?:ly)?\s+staged\.?/gi, '');
-    t = t.replace(/\bSome\s+images\s+(?:have\s+been|are)\s+virtually\s+staged\.?/gi, '');
-    t = t.replace(/\bPhotos\s+virtually\s+furnished\.?/gi, '');
-    t = t.replace(/\bdigitally\s+(?:altered|enhanced)\.?/gi, '');
-
-    // FDR Drive vs FDR general contradiction resolution (must run before standard FDR)
-    t = t.replace(/\bFDR\s+Drive\b/gi, 'F-D-R Drive');
+    // ==========================================
+    // STAGE 3: Transit, Compass & Abbreviation Collisions (FDR, A/C, Directions)
+    // ==========================================
 
     // Transit line splaying (must run before generic slashes)
     t = t.replace(/\b([a-zA-Z])\/([a-zA-Z])\/([a-zA-Z])\b/gi, (match, p1, p2, p3) => `${p1.toUpperCase()}, ${p2.toUpperCase()}, and ${p3.toUpperCase()}`);
@@ -498,68 +522,45 @@ function cleanTextForTTS(rawText) {
     t = t.replace(/\b(?:A\/C|a\/c)\b/gi, 'air conditioning');
     t = t.replace(/\bAC\b/g, 'air conditioning');
 
-    // Dimensions "by" replacement on raw digits/symbols (e.g. 51' x 26' -> 51' by 26')
-    t = t.replace(/(\d+(?:\s*['"”]|ft|feet|in|inches)?)\s*[xX×]\s*(\d+)/g, '$1 by $2');
+    // Washer and dryer expansions
+    t = t.replace(/\b(?:W\/D|w\/d)\b/gi, 'washer and dryer');
+    t = t.replace(/\bwasher\/dryer\b/gi, 'washer and dryer');
 
-    // A.M. / P.M. / AM/PM -> AM / PM / AM or PM
-    t = t.replace(/\bAM\/PM\b/gi, 'AM or PM');
-    t = t.replace(/\ba\.m\./gi, 'AM').replace(/\bp\.m\./gi, 'PM');
-    
-    // SF / -SF / S.F. -> square feet / -square feet
-    t = t.replace(/(-\s*)?\b(?:SF|S\.F\.)\b/gi, (match, hyphen) => hyphen ? '-square feet' : 'square feet');
-    
-    // Replace pipe symbols with a comma
-    t = t.replace(/\s*\|\s*/g, ', ');
+    // Expand E/W/N/S directions before street names/numbers (avoiding possessive 's or smart 's)
+    t = t.replace(/(?<!['’])\bE\.?\s+(\d+(?:st|nd|rd|th)?)\b/gi, 'East $1');
+    t = t.replace(/(?<!['’])\bW\.?\s+(\d+(?:st|nd|rd|th)?)\b/gi, 'West $1');
+    t = t.replace(/(?<!['’])\bN\.?\s+(\d+(?:st|nd|rd|th)?)\b/gi, 'North $1');
+    t = t.replace(/(?<!['’])\bS\.?\s+(\d+(?:st|nd|rd|th)?)\b/gi, 'South $1');
 
-    // Spacing around word-bound hyphens (e.g. jaw- dropping -> jaw-dropping, ignoring "and" to preserve direction lists)
-    t = t.replace(/\b([a-zA-Z]+)-\s+(?!and\b)([a-zA-Z]+)\b/g, '$1-$2');
-
-    // Add space after comma if between two letters (e.g. services,a -> services, a)
-    t = t.replace(/([a-zA-Z]),([a-zA-Z])/g, '$1, $2');
-
-    // Expand circa abbreviations followed by a year (e.g. c.1901 -> circa 1901)
+    // Expand circa abbreviation followed by a year (e.g. c.1901 -> circa 1901)
     t = t.replace(/\bca?\.\s*(\d{4})\b/gi, 'circa $1');
 
-    // Apply Brand Names & Material Phonetics replacements early
-    for (const bp of brandPhonetics) {
-        t = t.replace(bp.pattern, bp.replacement);
-    }
+    // Standard standalone abbreviations
+    t = t.replace(/\bapt\b\.?/gi, 'apartment');
+    t = t.replace(/\bapts\b\.?/gi, 'apartments');
+    t = t.replace(/\bste\b\.?/gi, 'suite');
+    t = t.replace(/\bstes\b\.?/gi, 'suites');
+    t = t.replace(/\bblvd\b\.?/gi, 'boulevard');
+    t = t.replace(/\bblvds\b\.?/gi, 'boulevards');
+    t = t.replace(/\bave\b\.?/gi, 'avenue');
+    t = t.replace(/\baves\b\.?/gi, 'avenues');
+    t = t.replace(/\bCPW\b/g, 'Central Park West');
+    t = t.replace(/\bRSD\b/g, 'Riverside Drive');
 
-    // Apply Acronym letter-by-letter replacements (case-sensitive)
-    for (const ar of acronymReplacements) {
-        t = t.replace(ar.pattern, ar.replacement);
-    }
+    // Match Street abbreviations only when tightly bound to digits/orientations
+    t = t.replace(/\b(\d+(?:st|nd|rd|th)?)\s+St\.?\b/gi, '$1 Street');
 
-    // BR / BRs -> bedrooms
-    t = t.replace(/\bBRs?\b/g, 'bedrooms').replace(/\bbrs?\b/g, 'bedrooms');
+    // Expand St. followed by a name to Saint (e.g. St. Moritz -> Saint Moritz)
+    t = t.replace(/\bSt\.?\s+([A-Z][a-z]+)\b/g, 'Saint $1');
 
-    // FDR -> formal dining room (remaining standalone FDR)
-    t = t.replace(/\bFDR\b/gi, 'formal dining room');
+    // Clean up trailing hyphens on direction words (e.g. north-, south-, east-, and west-facing -> north, south, east, and west-facing)
+    t = t.replace(/\b(north|south|east|west)-(?=[,\s]|$)/gi, '$1');
 
-    // NYC -> New York City
-    t = t.replace(/\bNYC\b/g, 'New York City');
+    // ==========================================
+    // STAGE 4: Address House Numbers & Bed/Bath Unit Splaying
+    // ==========================================
 
-    // AV -> audio visual
-    t = t.replace(/\bAV\b/gi, 'audio visual');
-
-    // Common real estate spacing/typo corrections
-    t = t.replace(/\batelephone\b/gi, 'a telephone');
-    t = t.replace(/\bawayfrom\b/gi, 'away from');
-    t = t.replace(/\bandpermit-ready\b/gi, 'and permit-ready');
-    t = t.replace(/\bCentral ParkSightlines\b/gi, 'Central Park Sightlines');
-    t = t.replace(/\bPH([A-Z][a-z]+)\b/g, 'PH $1');
-    t = t.replace(/\bandriver\b/gi, 'and river');
-    t = t.replace(/\bsprawlingnorth\b/gi, 'sprawling north');
-    t = t.replace(/\belegantcoffered\b/gi, 'elegant coffered');
-    t = t.replace(/\bfurtherthrough\b/gi, 'further through');
-
-    // Generic CamelCase splitting for merged words (e.g., intoCentral -> into Central, PHDesign -> PH Design)
-    t = t.replace(/([a-zA-Z])([A-Z][a-z]+)/g, '$1 $2');
-
-    // --- PHASE C: Number Conversion & Grouping ---
-
-    // 1. Specific BR/BA slash splay (e.g. 2BR/2BA, 3bed/2.5bath) before general slashes
-    // Use [/-] as the separator to avoid incorrectly matching comma-separated bedroom/bathroom lists
+    // Specific BR/BA slash splay (e.g. 2BR/2BA, 3bed/2.5bath)
     t = t.replace(/\b(\d+)\s*(?:BR|br|bed|bedroom)s?\s*[\/-]\s*(\d+(?:\.5)?)\s*(?:BA|ba|bath|bathroom)s?\b/gi, (match, br, ba) => {
         const brWord = convertNumberToWords(br) + ' bedroom';
         let baWord = '';
@@ -571,14 +572,8 @@ function cleanTextForTTS(rawText) {
         }
         return `${brWord}, ${baWord}`;
     });
-    
-    // 2. Handle unit-aware numbers first to prevent digit-splitting bugs (e.g. 6,700sf or 4,000SF)
-    t = t.replace(/\b([0-9,.]+)\s*(?:-|–)?\s*(sf|sq\.?\s*ft|sqft|square\s*feet|Squareft)\b/gi, (match, num, unit) => {
-        const cleanNum = num.replace(/,/g, '');
-        return convertNumberToWords(cleanNum) + ' square feet';
-    });
 
-    // 3. Address House Number conversions (before other general number conversions)
+    // Address House Number conversions
     const streetSuffixes = '(?:Street|Avenue|Road|Place|Boulevard|St\\.?|Ave\\.?|Rd\\.?|Pl\\.?|Blvd\\.?|Plaza|Loop|Drive|Dr\\.?)';
     const directions = '(?:East|West|North|South|E\\.?|W\\.?|N\\.?|S\\.?)';
     
@@ -600,6 +595,121 @@ function cleanTextForTTS(rawText) {
         return `${convertHouseNumber(houseNum)} ${streetName} ${suffix}`;
     });
 
+    // Expand Penthouse configurations cleanly (e.g., PH6A -> Penthouse Six A)
+    t = t.replace(/\bPH(\d+)([A-Za-z]?)\b/gi, (m, num, letter) => {
+        let spoken = 'Penthouse ' + convertNumberToWords(num);
+        if (letter) spoken += ' ' + letter.toUpperCase();
+        return spoken;
+    });
+
+    // ==========================================
+    // STAGE 5: Dimensions, Fractions & Units (Pre-processing while they are digits)
+    // ==========================================
+
+    // A.M. / P.M. / AM/PM -> AM / PM / AM or PM
+    t = t.replace(/\bAM\/PM\b/gi, 'AM or PM');
+    t = t.replace(/\ba\.m\./gi, 'AM').replace(/\bp\.m\./gi, 'PM');
+
+    // Dimensions "by" replacement on raw digits/symbols (e.g. 51' x 26' -> 51' by 26')
+    t = t.replace(/(\d+(?:\.\d+)?(?:\s*['"”]|ft|feet|in|inches)?)\s*[xX×]\s*(\d+(?:\.\d+)?)/g, '$1 by $2');
+
+    // Matches feet and inches format: e.g. 16'1" or 16'10"
+    t = t.replace(/(\d+(?:\.\d+)?)\s*'\s*(\d+(?:\.\d+)?)(?:"|inches?|inch)?/gi, (match, ft, inch) => {
+        const ftNum = parseFloat(ft);
+        const inchNum = parseFloat(inch);
+        const ftUnit = ftNum === 1 ? 'foot' : 'feet';
+        const inchUnit = inchNum === 1 ? 'inch' : 'inches';
+        const ftWords = ft.endsWith('.5') ? `${convertNumberToWords(Math.floor(ftNum))} and a half` : convertNumberToWords(ft);
+        const inchWords = inch.endsWith('.5') ? `${convertNumberToWords(Math.floor(inchNum))} and a half` : convertNumberToWords(inch);
+        return `${ftWords} ${ftUnit} ${inchWords} ${inchUnit}`;
+    });
+
+    // Matches standalone foot tags like 21' WIDE or 102' lot
+    t = t.replace(/(\d+(?:\.\d+)?)\s*'/g, (match, ft) => {
+        const ftNum = parseFloat(ft);
+        const unit = ftNum === 1 ? 'foot' : 'feet';
+        if (ft.endsWith('.5')) {
+            const baseWords = convertNumberToWords(Math.floor(ftNum));
+            return `${baseWords} and a half feet`;
+        }
+        return `${convertNumberToWords(ft)} ${unit}`;
+    });
+
+    // Matches standalone inch tags like 48" range
+    t = t.replace(/(\d+(?:\.\d+)?)\s*"/g, (match, inch) => {
+        const inchNum = parseFloat(inch);
+        const unit = inchNum === 1 ? 'inch' : 'inches';
+        if (inch.endsWith('.5')) {
+            const baseWords = convertNumberToWords(Math.floor(inchNum));
+            return `${baseWords} and a half inches`;
+        }
+        return `${convertNumberToWords(inch)} ${unit}`;
+    });
+
+    // Unit-aware square feet expansion
+    t = t.replace(/\b([0-9,.]+)\s*(?:-|–)?\s*(sf|sq\.?\s*ft\b\.?|sqft\b|square\s*feet|Squareft)\b/gi, (match, num, unit) => {
+        const cleanNum = num.replace(/,/g, '');
+        return convertNumberToWords(cleanNum) + ' square feet';
+    });
+
+    // Per Square Foot Suffixes ($741/ft²)
+    t = t.replace(/\/(?:ft²|sq\.?\s*ft\b\.?|sqft\b)/gi, ' per square foot');
+
+    // Standard sq. ft. abbreviation expansion (when not preceded by a slash)
+    t = t.replace(/\b(?:sq\.?\s*ft\b\.?|sqft\b)/gi, 'square feet');
+
+    // Sq -> Square (done late to avoid breaking sq.ft. matches)
+    t = t.replace(/\bSq\b/g, 'Square').replace(/\bsq\b/g, 'square');
+    
+    // FT -> Feet (done late to avoid breaking ft matches)
+    t = t.replace(/\bFT\b/g, 'Feet').replace(/\bft\b/g, 'feet');
+
+    // Specific Fractions
+    t = t.replace(/\b(\d+)\s+1\/2\b/g, (m, num) => `${convertNumberToWords(num)} and a half`);
+    t = t.replace(/\b1\/2\b/g, 'a half');
+    t = t.replace(/\b(\d+)\s+1\/4\b/g, (m, num) => `${convertNumberToWords(num)} and a quarter`);
+    t = t.replace(/\b1\/4\b/g, 'a quarter');
+
+    // ==========================================
+    // STAGE 6: Phonetic Brand / Designer / Material Dictionary & Preserved Acronyms
+    // ==========================================
+
+    // Apply Brand Names & Material Phonetics replacements
+    // (Disabled: keeping foreign/proper nouns raw per manual listening feedback)
+    for (const bp of []) {
+        t = t.replace(bp.pattern, bp.replacement);
+    }
+
+    // Apply Acronym letter-by-letter replacements (case-sensitive)
+    for (const ar of acronymReplacements) {
+        t = t.replace(ar.pattern, ar.replacement);
+    }
+
+    // BR / BRs -> bedrooms
+    t = t.replace(/\bBRs?\b/g, 'bedrooms').replace(/\bbrs?\b/g, 'bedrooms');
+
+    // Avoid doubling of formal dining room if already followed by FDR abbreviation
+    t = t.replace(/\bformal\s+dining\s+room\s*(?:,|\b)\s*\(?\s*FDR\s*\)?/gi, 'formal dining room');
+
+    // FDR -> formal dining room (remaining standalone FDR, protecting FDR Drive)
+    t = t.replace(/\bFDR\b(?!\s+Drive\b)/gi, 'formal dining room');
+
+    // NYC -> New York City
+    t = t.replace(/\bNYC\b/g, 'New York City');
+
+    // AV -> audio visual
+    t = t.replace(/\bAV\b/gi, 'audio visual');
+
+    // Generic CamelCase splitting for remaining merged words (run after brand phonetics to avoid breaking brand names, narrowed to standard patterns)
+    t = t.replace(/\b([A-Z]?[a-z]+)([A-Z][a-z]+)\b/g, '$1 $2');
+
+    // ==========================================
+    // STAGE 7: Standard Number Conversion & Spacing/Punctuation Cleanups
+    // ==========================================
+
+    // Convert remaining ampersands to 'and'
+    t = t.replace(/\s*&\s*/g, ' and ');
+
     // Handle millions ranges first, e.g. $1.275M or $1.2M
     t = t.replace(/\$([0-9.]+)\s*(M|m)\b/g, (match, val) => {
         const numVal = parseFloat(val) * 1000000;
@@ -612,7 +722,7 @@ function cleanTextForTTS(rawText) {
     });
     
     // Handle standard numeric currency figures with commas ($360,000,000 or $360,000)
-    t = t.replace(/\$([0-9,]+)(\.[0-9]{2})?/g, (match, val, cents) => {
+    t = t.replace(/\$([0-9]+(?:,[0-9]+)*)(\.[0-9]{2})?/g, (match, val, cents) => {
         const cleanNum = val.replace(/,/g, '');
         let spoken = convertNumberToWords(cleanNum) + " dollars";
         if (cents) {
@@ -630,9 +740,14 @@ function cleanTextForTTS(rawText) {
         return `${words} and a half ${unit}`;
     });
 
-    // Pre-process non-currency numbers with commas (e.g. 2,000 sq ft or 2,482)
+    // Pre-process large round numbers >= 1,000,000 ending in zeros to millions notation (without currency prefix)
     t = t.replace(/\b\d{1,3}(,\d{3})+(\.\d+)?\b/g, (match) => {
         const cleanNum = match.replace(/,/g, '');
+        const valFloat = parseFloat(cleanNum);
+        if (!isNaN(valFloat) && valFloat >= 1000000 && valFloat % 10000 === 0) {
+            const millions = valFloat / 1000000;
+            return convertNumberToWords(millions) + ' million';
+        }
         return convertNumberToWords(cleanNum);
     });
 
@@ -641,77 +756,39 @@ function cleanTextForTTS(rawText) {
         return convertNumberToWords(match);
     });
 
-    // Structural Slashes & Specific Fractions
-    t = t.replace(/\b(\d+)\s+1\/2\b/g, (m, num) => `${convertNumberToWords(num)} and a half`);
-    t = t.replace(/\b1\/2\b/g, 'a half');
-    t = t.replace(/\b(\d+)\s+1\/4\b/g, (m, num) => `${convertNumberToWords(num)} and a quarter`);
-    t = t.replace(/\b1\/4\b/g, 'a quarter');
-    
-    // Per Square Foot Suffixes ($741/ft²)
-    t = t.replace(/\/(?:ft²|sq\.?\s*ft\b\.?|sqft\b)/gi, ' per square foot');
-    
-    // Standard sq. ft. abbreviation expansion (when not preceded by a slash)
-    t = t.replace(/\b(?:sq\.?\s*ft\b\.?|sqft\b)/gi, 'square feet');
-
-    // Matches 10'3" or 14'6 format
-    t = t.replace(/\b(\d+)'\s*(\d+)(?:"|inches?|inch)?/gi, (match, ft, inch) => {
-        return `${convertNumberToWords(ft)} feet ${convertNumberToWords(inch)} inches`;
-    });
-    
-    // Matches standalone foot tags like 21' WIDE or 102' lot
-    t = t.replace(/\b(\d+)'/g, (match, ft) => {
-        const word = convertNumberToWords(ft);
-        const unit = parseInt(ft, 10) === 1 ? 'foot' : 'feet';
-        return `${word} ${unit}`;
-    });
-
-    // --- PHASE D: Address & Layout Expansion ---
-    t = t.replace(/\(\s*DEGREE\s*\)/gi, 'degrees');
-    t = t.replace(/—|–/g, ' '); // Strip em/en dashes cleanly
-    
-    t = t.replace(/\bapt\b\.?/gi, 'apartment');
-    t = t.replace(/\bapts\b\.?/gi, 'apartments');
-    t = t.replace(/\bste\b\.?/gi, 'suite');
-    t = t.replace(/\bstes\b\.?/gi, 'suites');
-    t = t.replace(/\bblvd\b\.?/gi, 'boulevard');
-    t = t.replace(/\bblvds\b\.?/gi, 'boulevards');
-    t = t.replace(/\bave\b\.?/gi, 'avenue');
-    t = t.replace(/\baves\b\.?/gi, 'avenues');
-    t = t.replace(/\bCPW\b/g, 'Central Park West');
-    t = t.replace(/\bRSD\b/g, 'Riverside Drive');
-
-    // Sq -> Square (done late to avoid breaking sq.ft. matches)
-    t = t.replace(/\bSq\b/g, 'Square').replace(/\bsq\b/g, 'square');
-    
-    // FT -> Feet (done late to avoid breaking ft matches)
-    t = t.replace(/\bFT\b/g, 'Feet').replace(/\bft\b/g, 'feet');
-    
-    // Expand Penthouse configurations cleanly (e.g., PH6A -> Penthouse Six A)
-    t = t.replace(/\bPH(\d+)([A-Za-z]?)\b/gi, (m, num, letter) => {
-        let spoken = 'Penthouse ' + convertNumberToWords(num);
-        if (letter) spoken += ' ' + letter.toUpperCase();
-        return spoken;
+    // Convert decade and plural numbers (e.g. 60s -> sixties, 1920s -> nineteen twenties)
+    t = t.replace(/\b(\d{2,4})s\b/g, (match, digitStr) => {
+        const val = parseInt(digitStr, 10);
+        if (val === 60) return 'sixties';
+        if (val === 70) return 'seventies';
+        if (val === 80) return 'eighties';
+        if (val === 90) return 'nineties';
+        if (val === 20) return 'twenties';
+        if (val === 30) return 'thirties';
+        if (val === 40) return 'forties';
+        if (val === 50) return 'fifties';
+        if (val >= 1800 && val <= 2099 && val % 10 === 0) {
+            const baseWords = convertYearToWords(val.toString());
+            return baseWords.replace(/\btwenty\b/g, 'twenties')
+                            .replace(/\bthirty\b/g, 'thirties')
+                            .replace(/\bforty\b/g, 'forties')
+                            .replace(/\bfifty\b/g, 'fifties')
+                            .replace(/\bsixty\b/g, 'sixties')
+                            .replace(/\bseventy\b/g, 'seventies')
+                            .replace(/\beighty\b/g, 'eighties')
+                            .replace(/\bninety\b/g, 'nineties');
+        }
+        return match;
     });
 
-    // Expand E/W/N/S directions before street names/numbers (avoiding possessive 's)
-    t = t.replace(/(?<!')\bE\.?\s+(\d+(?:st|nd|rd|th)?)\b/gi, 'East $1');
-    t = t.replace(/(?<!')\bW\.?\s+(\d+(?:st|nd|rd|th)?)\b/gi, 'West $1');
-    t = t.replace(/(?<!')\bN\.?\s+(\d+(?:st|nd|rd|th)?)\b/gi, 'North $1');
-    t = t.replace(/(?<!')\bS\.?\s+(\d+(?:st|nd|rd|th)?)\b/gi, 'South $1');
+    // Standard year translation: four-digit numbers from 1800 to 2099
+    t = t.replace(/\b(18|19|20)\d{2}\b/g, (match) => convertYearToWords(match));
 
-    // Expand St. followed by a name to Saint (e.g. St. Moritz -> Saint Moritz)
-    t = t.replace(/\bSt\.?\s+([A-Z][a-z]+)\b/g, 'Saint $1');
+    // Standalone ordinals (e.g. 3rd -> third)
+    t = t.replace(/\b(\d+)(st|nd|rd|th)\b/gi, (m, num) => ordinalToWords(num));
 
-    // Match Street abbreviations only when tightly bound to digits/orientations
-    t = t.replace(/\b(\d+(?:st|nd|rd|th)?)\s+St\.?\b/gi, '$1 Street');
-
-    // Clean up trailing hyphens on direction words (e.g. north-, south-, east-, and west-facing -> north, south, east, and west-facing)
-    t = t.replace(/\b(north|south|east|west)-(?=[,\s]|$)/gi, '$1');
-
-    // Clean up slashes between words/numbers (e.g. room/gallery -> room and gallery, C1-9/R10 -> C1-9 and R10)
-    // Note: This runs after fractions are already converted to avoid breaking 1/2 or 1/4. Run twice for contiguous/overlapping slashes.
-    t = t.replace(/\b([a-zA-Z0-9-]+)\s*\/\s*\b([a-zA-Z0-9-]+)\b/g, '$1 and $2');
-    t = t.replace(/\b([a-zA-Z0-9-]+)\s*\/\s*\b([a-zA-Z0-9-]+)\b/g, '$1 and $2');
+    // Remaining standalone integers
+    t = t.replace(/\b\d+\b/g, (num) => convertNumberToWords(num));
 
     // Handle alphanumeric number conversions (e.g. One57 -> One fifty seven, R10 -> R ten, 71A -> seventy one A)
     t = t.replace(/\b([Oo]ne)(\d+)([']s)?\b/g, (m, word, num, possessive) => {
@@ -723,17 +800,33 @@ function cleanTextForTTS(rawText) {
         return `${convertNumberToWords(num)} ${letter}`;
     });
 
-    // --- STEP 6: Standalone Ordinals & Floating Digits ---
-    t = t.replace(/\b(18|19|20)\d{2}\b/g, (match) => convertYearToWords(match));
-    t = t.replace(/\b(\d+)(st|nd|rd|th)\b/gi, (m, num) => ordinalToWords(num));
-    t = t.replace(/\b\d+\b/g, (num) => convertNumberToWords(num));
+    // Final unit adjustments for splayed alphanumeric units (e.g. thirty ft -> thirty feet)
+    t = t.replace(/\bft\b/g, 'feet');
+    t = t.replace(/\bsf\b/g, 'square feet');
 
-    // --- PHASE E: CSV Clean & Sanitation (Step 7) ---
-    // Drop structural flow punctuation (commas and semicolons) by converting to space as requested
-    t = t.replace(/[,;]/g, ' ');
+    // Clean up slashes between words/numbers (e.g. room/gallery -> room and gallery, C1-9/R10 -> C1-9 and R10)
+    t = t.replace(/\b([a-zA-Z0-9-]+)\s*\/\s*\b([a-zA-Z0-9-]+)\b/g, '$1 and $2');
+    t = t.replace(/\b([a-zA-Z0-9-]+)\s*\/\s*\b([a-zA-Z0-9-]+)\b/g, '$1 and $2');
+
+    // Replace pipe symbols with a comma to add structural pauses
+    t = t.replace(/\s*\|\s*/g, ', ');
 
     // Clean up multiple periods, e.g. "..." or ".." -> "."
     t = t.replace(/\.{2,}/g, '.');
+
+    // Remove commas before 'and' to prevent double pauses in TTS audio
+    t = t.replace(/,\s*and\b/gi, ' and');
+
+    // Clean up duplicate commas, e.g. ",," -> ","
+    t = t.replace(/,\s*,/g, ',');
+
+    // Standardize spacing around commas and semicolons (preserve breathing pauses)
+    t = t.replace(/\s*,\s*/g, ', ');
+    t = t.replace(/\s*;\s*/g, '; ');
+
+    // Clean up period-comma or comma-period relics left by replacements
+    t = t.replace(/\.,/g, ', ');
+    t = t.replace(/,\./g, '.');
 
     // Ensure space after sentence-ending punctuation followed by a letter, and capitalize it
     t = t.replace(/([.!?])([a-zA-Z])/g, (match, punc, letter) => `${punc} ${letter.toUpperCase()}`);
