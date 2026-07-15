@@ -7,7 +7,7 @@ const writtenNumber = require('written-number');
 function convertNumberToWords(num) {
     if (num === null || num === undefined) return '';
     let nStr = num.toString().trim();
-    
+
     // Check if it's a large round number we can convert to millions (e.g. 3,600,000 -> 3.6 million)
     const valFloat = parseFloat(nStr.replace(/,/g, ''));
     if (!isNaN(valFloat) && valFloat >= 1000000 && valFloat % 10000 === 0) {
@@ -23,13 +23,13 @@ function convertNumberToWords(num) {
             const digit = parseInt(d, 10);
             return isNaN(digit) ? '' : (digit === 0 ? 'zero' : writtenNumber(digit));
         }).filter(w => w !== '').join(' ');
-        
+
         let result = '';
         if (intWords) result += intWords;
         if (decWords) result += (result ? ' point ' : 'point ') + decWords;
         return result.replace(/-/g, ' ');
     }
-    
+
     const val = parseInt(nStr, 10);
     if (isNaN(val)) return '';
     if (val === 0) return 'zero';
@@ -42,12 +42,15 @@ function convertNumberToWords(num) {
 function convertYearToWords(yearStr) {
     const year = parseInt(yearStr, 10);
     if (year < 1800 || year > 2099) return convertNumberToWords(yearStr);
-    
-    if (year === 2000) return 'two thousand';
-    
+
+    if (year >= 2000 && year <= 2009) {
+        if (year === 2000) return 'two thousand';
+        return 'two thousand and ' + convertNumberToWords(year % 100);
+    }
+
     const century = Math.floor(year / 100);
     const decade = year % 100;
-    
+
     const centuryWords = convertNumberToWords(century);
     if (decade === 0) {
         return centuryWords + ' hundred';
@@ -65,7 +68,7 @@ function ordinalToWords(numStr) {
     const num = parseInt(numStr, 10);
     if (isNaN(num)) return numStr;
     const words = convertNumberToWords(num);
-    
+
     if (words.endsWith('one')) return words.slice(0, -3) + 'first';
     if (words.endsWith('two')) return words.slice(0, -3) + 'second';
     if (words.endsWith('three')) return words.slice(0, -5) + 'third';
@@ -85,7 +88,7 @@ function convertHouseNumber(numStr) {
     const num = parseInt(numStr, 10);
     if (isNaN(num)) return numStr;
     if (num < 100 || num > 9999) return convertNumberToWords(numStr);
-    
+
     if (num >= 100 && num <= 999) {
         const hundreds = Math.floor(num / 100);
         const tens = num % 100;
@@ -112,12 +115,58 @@ function convertHouseNumber(numStr) {
 }
 
 /**
+ * Helper to convert Street Numbers.
+ * Always returns ordinal words.
+ * If street number >= 110 and middle digit is not zero (tens digit not zero),
+ * we drop "hundred" / "hundred and" in the conversion.
+ * Example: "110" -> "one tenth", "120" -> "one twentieth".
+ */
+function convertStreetNumber(numStr) {
+    const num = parseInt(numStr, 10);
+    if (isNaN(num)) return numStr;
+    let words = ordinalToWords(numStr);
+    if (num >= 110) {
+        const tens = Math.floor((num % 100) / 10);
+        if (tens !== 0) {
+            words = words.replace(/\bhundred\s*(?:and)?\b/gi, '').replace(/\s+/g, ' ').trim();
+        }
+    }
+    return words;
+}
+
+/**
+ * Helper to check if a matched text is within a ceiling context (nearby word "ceiling").
+ */
+function isCeilingContext(text, match, matchIndex) {
+    if (matchIndex === -1 || !text) return false;
+    const before = text.substring(Math.max(0, matchIndex - 45), matchIndex).toLowerCase();
+    const after = text.substring(matchIndex + match.length, Math.min(text.length, matchIndex + match.length + 45)).toLowerCase();
+    return before.includes('ceiling') || after.includes('ceiling');
+}
+
+/**
+ * Helper to format feet-inches dimensions consistently.
+ */
+function formatDimension(ftStr, inchStr, isCeiling = false) {
+    const ftNum = parseInt(ftStr, 10);
+    const inchNum = parseInt(inchStr, 10);
+    const ftUnit = isCeiling ? 'foot' : (ftNum === 1 ? 'foot' : 'feet');
+    const ftWords = convertNumberToWords(ftNum);
+    if (inchNum === 0) {
+        return `${ftWords} ${ftUnit}`;
+    }
+    const inchUnit = isCeiling ? 'inch' : (inchNum === 1 ? 'inch' : 'inches');
+    const inchWords = convertNumberToWords(inchNum);
+    return `${ftWords} ${ftUnit} ${inchWords} ${inchUnit}`;
+}
+
+/**
  * Helper to identify if a line qualifies as a Title Case heading.
  */
 function isTitleCaseHeading(line) {
     const l = line.trim();
     if (l.length === 0) return false;
-    
+
     // If it contains bedroom/bathroom/size specs (e.g. 3 Beds, 2 Baths or 3 bedrooms), do not strip it
     if (/\b\d+\s*(?:bed|bath|br|ba|sq?\.?\s*ft|sqft|square|room)/i.test(l)) {
         return false;
@@ -136,212 +185,6 @@ function isTitleCaseHeading(line) {
     return !hasSentenceEndingPunc && isCapitalized;
 }
 
-const brandPhonetics = [
-    { pattern: /\bSHoP\s+Architects\b/gi, replacement: 'S H O P Architects' },
-    { pattern: /\bMiele\b/gi, replacement: 'Mee-luh' },
-    { pattern: /\bGaggenau\b/gi, replacement: 'Gah-guh-now' },
-    { pattern: /\bSub-Zero\b/gi, replacement: 'Sub Zero' },
-    { pattern: /\bSubZero\b/gi, replacement: 'Sub Zero' },
-    { pattern: /\bDornbracht\b/gi, replacement: 'Dorn-brakt' },
-    { pattern: /\bDorn\s+Bracht\b/gi, replacement: 'Dorn-brakt' },
-    { pattern: /\bDuravit\b/gi, replacement: 'Doo-ruh-vit' },
-    { pattern: /\bToto\s+Neorest\b/gi, replacement: 'To-to Nee-o-rest' },
-    { pattern: /\bToto\b/gi, replacement: 'To-to' },
-    { pattern: /\bSmallbone\s+of\s+Devizes\b/gi, replacement: 'Small-bone of De-vye-ziz' },
-    { pattern: /\bSmallbone\s+Devizes\b/gi, replacement: 'Small-bone of De-vye-ziz' },
-    { pattern: /\bThierry\s+Despont\b/gi, replacement: 'Tee-air-ee Day-pohn' },
-    { pattern: /\bMolteni&C\b/gi, replacement: 'Mole-tay-nee and C' },
-    { pattern: /\bMolteni\b/gi, replacement: 'Mole-tay-nee' },
-    { pattern: /\bLefroy\s+Brooks\b/gi, replacement: 'Lefroy Brooks' },
-    { pattern: /\bLutron\b/gi, replacement: 'Loo-tron' },
-    { pattern: /\bJean\s+Nouvel\b/gi, replacement: 'Zhahn Noo-vel' },
-    { pattern: /\bAnish\s+Kapoor\b/gi, replacement: 'Ah-neesh Kah-poor' },
-    { pattern: /\bAntonio\s+Lupi\b/gi, replacement: 'An-toe-nee-oh Loo-pee' },
-    { pattern: /\bDeLemos\s+&\s+Cordes\b/gi, replacement: 'Deh-Lee-mose and Kor-deez' },
-    { pattern: /\bOnda\s+Argentata\b/gi, replacement: 'Ohn-dah Ar-jen-tah-tah' },
-    { pattern: /\bCovelano\b/gi, replacement: 'Koe-veh-lah-noe' },
-    { pattern: /\bMAWD\b/g, replacement: 'M-A-W-D' },
-    { pattern: /\bSalvatori\b/gi, replacement: 'Sal-vuh-tor-ee' },
-    { pattern: /\bCrema\s+d'Orcia\b/gi, replacement: 'Cray-muh Dor-chee-uh' },
-    { pattern: /\bLa\s+Cornue\b/gi, replacement: 'Lah Cor-noo' },
-    { pattern: /\bCetra\s*Ruddy\b/gi, replacement: 'Set-ruh-rud-ee' },
-    { pattern: /\bFior\s+di\s+Bosco\b/gi, replacement: 'Fee-or dee Boss-co' },
-    { pattern: /\bAgglo\s+Ceppo\b/gi, replacement: 'Ahg-lo Chep-o' },
-    { pattern: /\bCeleste\s+Grigio\b/gi, replacement: 'Che-les-tay Gree-jo' },
-    { pattern: /\bPelle\s+Grigio\b/gi, replacement: 'Pell-ay Gree-jo' },
-    { pattern: /\bL'École\s+des\s+Beaux-Arts\b/gi, replacement: "L'ay-kole day boh-zahr" },
-    { pattern: /\bStudio\s+Sofield\b/gi, replacement: 'Studio So-feeld' },
-    { pattern: /\bP\.E\.\s+Guerin\b/gi, replacement: 'P E Gair-in' },
-    { pattern: /\bBulthaup\b/gi, replacement: 'Boolt-howp' },
-    { pattern: /\bCrestron\b/gi, replacement: 'Kres-tron' },
-    { pattern: /\bRafael\s+Viñoly\b/gi, replacement: 'Rah-fah-el Vin-yoh-lee' },
-    { pattern: /\bDeborah\s+Berke\b/gi, replacement: 'De-buh-ruh Burk' },
-    { pattern: /\bShaun\s+Hergatt\b/gi, replacement: 'Shawn Her-gat' },
-    { pattern: /\bLes\s+Clefs\s+d'Or\b/gi, replacement: 'Lay Clay Dor' },
-    { pattern: /\bOlson\s+Kundig\b/gi, replacement: 'Ohl-son Kun-dig' },
-    { pattern: /\bSavant\b/gi, replacement: 'Sah-vahnt' },
-    { pattern: /\bElectrolux\b/gi, replacement: 'Ee-lek-tro-lux' },
-    { pattern: /\bDaikin\b/gi, replacement: 'Dye-kin' },
-    { pattern: /\bLiebherr\b/gi, replacement: 'Leeb-hehr' },
-    { pattern: /\bControl4\b/gi, replacement: 'Control Four' },
-    { pattern: /\bSomfy\b/gi, replacement: 'Sahm-fee' },
-    { pattern: /\bPhylrich\b/gi, replacement: 'Fil-rich' },
-    { pattern: /\bRobern\b/gi, replacement: 'Row-burn' },
-    { pattern: /\bAnnabelle\s+Selldorf\b/gi, replacement: 'An-nuh-bel Sel-dorf' },
-    { pattern: /\bVica\b/gi, replacement: 'Vee-kuh' },
-    { pattern: /\bScavolini\b/gi, replacement: 'Skah-vo-lee-nee' },
-    { pattern: /\bClé\b/gi, replacement: 'Clay' },
-    { pattern: /\bPorcelanosa\b/gi, replacement: 'Por-seh-lah-no-sah' },
-    { pattern: /\bThasos\b/gi, replacement: 'Tah-sose' },
-    { pattern: /\bArclinea\b/gi, replacement: 'Ark-li-nay-uh' },
-    { pattern: /\bThermador\b/gi, replacement: 'Ther-muh-dor' },
-    { pattern: /\bLafayette\s+A\.\s+Goldstone\b/gi, replacement: 'Lah-fay-et A Gold-stone' },
-    { pattern: /\bButterflyMX\b/gi, replacement: 'Butterfly M X' },
-    { pattern: /\bBlanco\b/gi, replacement: 'Blahn-ko' },
-    { pattern: /\bInès\s+Lamunière\b/gi, replacement: 'Ee-nez Lah-mun-yair' },
-    { pattern: /\bFrancois\s+Ier\b/gi, replacement: 'Francois Premier' },
-    { pattern: /\bPeter\s+Pennoyer\b/gi, replacement: 'Peter Pen-noy-er' },
-    { pattern: /\bTheodore\s+Prudon\b/gi, replacement: 'Theodore Pru-don' },
-    { pattern: /\bJohn\s+McCall\b/gi, replacement: 'John Muh-call' },
-    { pattern: /\bBakes\s+&\s+Kropp\b/gi, replacement: 'Bakes and Kropp' },
-    { pattern: /\bJennAir\b/gi, replacement: 'Jen-Air' },
-    { pattern: /\bSchindler\b/gi, replacement: 'Shind-ler' },
-    { pattern: /\bAndrea\s+Miranda\b/gi, replacement: 'And-ray-uh Mih-ran-duh' },
-    { pattern: /\bRandy\s+Kemper\b/gi, replacement: 'Randy Kem-per' },
-    { pattern: /\bAnthony\s+Ingrao\b/gi, replacement: 'Anthony In-gray-o' },
-    { pattern: /\bNero\s+Marquina\b/gi, replacement: 'Nee-ro Mar-kee-nuh' },
-    { pattern: /\bGabellini\s+Sheppard\b/gi, replacement: 'Gah-bel-lee-nee Shep-ard' },
-    { pattern: /\bGilles\s+&\s+Boissier\b/gi, replacement: 'Jeel ay Bwah-see-ay' },
-    { pattern: /\bGilles\s+et\s+Boissier\b/gi, replacement: 'Jeel ay Bwah-see-ay' },
-    { pattern: /\bFaena\b/gi, replacement: 'Fah-ay-nuh' },
-    { pattern: /\bTaj\s+Mahal\b/gi, replacement: 'Tahj Muh-hal' },
-    { pattern: /\bHydrosystems\b/gi, replacement: 'Hydro-systems' },
-    { pattern: /\bGrigio\s+Onyx\b/gi, replacement: 'Gree-jo Onyx' },
-    { pattern: /\bKraus\s+Hi-Tech\b/gi, replacement: 'Krow-ss High-Tech' },
-    { pattern: /\bSO-IL\b/gi, replacement: 'So-Ill' },
-    { pattern: /\bLineadecor\b/gi, replacement: 'Lin-ee-uh-decor' },
-    { pattern: /\bJ'adore\s+stone\b/gi, replacement: 'Jah-dor stone' },
-    { pattern: /\bCaesarstone\b/gi, replacement: 'See-zer-stone' },
-    { pattern: /\bSanta\s+Marina\b/gi, replacement: 'Santa Muh-ree-nuh' },
-    { pattern: /\bBuster\s+&\s+Punch\b/gi, replacement: 'Buster and Punch' },
-    { pattern: /\bArabescato\s+Antico\b/gi, replacement: 'Ah-ruh-beh-skah-to Ahn-tee-co' },
-    { pattern: /\bAmuneal\b/gi, replacement: 'Am-u-neel' },
-    { pattern: /\bKallista\b/gi, replacement: 'Kuh-lis-tuh' },
-    { pattern: /\bMasterCool\b/gi, replacement: 'Master Cool' },
-    { pattern: /\bWright\s+Fit\b/gi, replacement: 'Wright Fit' },
-    { pattern: /\bUbiquiti\b/gi, replacement: 'You-bik-wit-ee' },
-    { pattern: /\bMcIntosh\b/gi, replacement: 'Mak-in-tosh' },
-    { pattern: /\bBowers\s+&\s+Wilkins\b/gi, replacement: 'Bowers and Wilkins' },
-    { pattern: /\bNolita\b/gi, replacement: 'No-lee-tuh' },
-    { pattern: /\bVeselka\b/gi, replacement: 'Veh-sel-kuh' },
-    { pattern: /\bMcSorley's\b/gi, replacement: 'Mak-sor-lees' },
-    { pattern: /\bRichard\s+Ciccarelli\b/gi, replacement: 'Richard Chi-cuh-rel-lee' },
-    { pattern: /\bEucalyptus\b/gi, replacement: 'You-cuh-lip-tus' },
-    { pattern: /\bNeuvellano\b/gi, replacement: 'New-vel-lah-no' },
-    { pattern: /\bROTTET\s+Studio\b/gi, replacement: 'Rot-tet Studio' },
-    { pattern: /\bRottet\s+Studio\b/gi, replacement: 'Rot-tet Studio' },
-    { pattern: /\bGrigio\s+Orobico\b/gi, replacement: 'Gree-jo O-ro-bee-co' },
-    { pattern: /\bOfficine\s+Gullo\b/gi, replacement: 'Oh-fee-chee-nay Gool-lo' },
-    { pattern: /\bAltamarea\s+Group\b/gi, replacement: 'Al-tuh-mah-ray-uh Group' },
-    { pattern: /\bMelamed\s+Architect\b/gi, replacement: 'Mel-ah-med Architect' },
-    { pattern: /\bDiller\s+Scofidio\s+\+\s+Renfro\b/gi, replacement: 'Diller Sko-fee-dee-o and Ren-fro' },
-    { pattern: /\bStudio\s+Zuchowicki\b/gi, replacement: 'Studio Zoo-cho-wick-ee' },
-    { pattern: /\bMaryam\s+Nassir\s+Zadeh\b/gi, replacement: 'Mah-ree-um Nah-seer Zay-deh' },
-    { pattern: /\bHenrybuilt\b/gi, replacement: 'Henry-built' },
-    { pattern: /\bStruxure\b/gi, replacement: 'Struk-chur' },
-    { pattern: /\bBromic\b/gi, replacement: 'Bro-mik' },
-    { pattern: /\bThermory\s+Ash\b/gi, replacement: 'Ther-muh-ree Ash' },
-    { pattern: /\bRenu\s+Therapy\b/gi, replacement: 'Ree-new Therapy' },
-    { pattern: /\bRiFRA\b/gi, replacement: 'Ree-frah' },
-    { pattern: /\bRifra\b/gi, replacement: 'Ree-frah' },
-    { pattern: /\bKamp\s+Studios\b/gi, replacement: 'Kamp Studios' },
-    { pattern: /\bSow\s+Haus\b/gi, replacement: 'So House' },
-    { pattern: /\bSonance\b/gi, replacement: 'So-nans' },
-    { pattern: /\bCalacatta\s+Paonazzo\b/gi, replacement: 'Kah-lah-kah-tah Pah-o-naht-so' },
-    { pattern: /\bLa\s+Palestra\b/gi, replacement: 'Lah Pah-les-tra' },
-    { pattern: /\bMichael\s+Aiduss\b/gi, replacement: 'Michael Ay-duss' },
-    { pattern: /\bSchumacher\b/gi, replacement: 'Shoo-mah-ker' },
-    { pattern: /\bChango\s+&\s+Co\.\b/gi, replacement: 'Chang-go and Company' },
-    { pattern: /\bMike\s+Ingui\b/gi, replacement: 'Mike In-gwee' },
-    { pattern: /\bAGA\s+Elise\b/gi, replacement: 'Ah-guh Eh-leez' },
-    { pattern: /\bIpe\b/gi, replacement: 'Ee-pay' },
-    { pattern: /\bBeyer\s+Blinder\s+Belle\b/gi, replacement: 'By-er Blinder Bell' },
-    { pattern: /\bAlexandra\s+Champalimaud\b/gi, replacement: 'Alexandra Sham-pah-lee-moh' },
-    { pattern: /\bMontclair\s+Danby\b/gi, replacement: 'Mont-clair Dan-bee' },
-    { pattern: /\bAllmilmo\b/gi, replacement: 'All-mil-moh' },
-    { pattern: /\bCelador\s+Oyster\b/gi, replacement: 'Sel-uh-dor Oyster' },
-    { pattern: /\bPianeta\s+Legno\s+Aformosia\b/gi, replacement: 'Pee-uh-neh-tah Leg-no Ah-for-mo-zee-uh' },
-    { pattern: /\bGrohe\b/gi, replacement: 'Gro-he' },
-    { pattern: /\bAndres\s+Escobar\b/gi, replacement: 'Andres Es-co-bar' },
-    { pattern: /\bJessie\s+Lookfong\b/gi, replacement: 'Jessie Look-fong' },
-    { pattern: /\bLondon\s+Towne\s+House\b/gi, replacement: 'London Towne House' },
-    { pattern: /\bSHVO\b/gi, replacement: 'Shvo' },
-    { pattern: /\bDaniel\s+Boulud\b/gi, replacement: 'Daniel Boo-loo' },
-    { pattern: /\bBoulud\s+Privé\b/gi, replacement: 'Boo-loo Pree-vay' },
-    { pattern: /\bMarin\s+Architects\b/gi, replacement: 'Marin Architects' },
-    { pattern: /\bEllevi\b/gi, replacement: 'El-eh-vee' },
-    { pattern: /\bFischer\s+\+\s+Makooi\s+Architects\b/gi, replacement: 'Fischer and Muh-koo-ee Architects' },
-    { pattern: /\bAlpi\s+Wood\b/gi, replacement: 'Al-pee Wood' },
-    { pattern: /\bBasaltina\b/gi, replacement: 'Bah-sal-tee-nuh' },
-    { pattern: /\bJames\s+Corner\s+Field\s+Operations\b/gi, replacement: 'James Corner Field Operations' },
-    { pattern: /\bTwo\s+Trees\b/gi, replacement: 'Two Trees' },
-    { pattern: /\bAran\s+Cucine\b/gi, replacement: 'Ah-rahn Coo-chee-nay' },
-    { pattern: /\bPrintemps\b/gi, replacement: 'Prahn-tahm' },
-    { pattern: /\bMaison\s+Passerelle\b/gi, replacement: 'Mayson Pah-seh-rel' },
-    { pattern: /\bSalon\s+Vert\b/gi, replacement: 'Sah-lohn Vair' },
-    { pattern: /\bCafé\s+Jalu\b/gi, replacement: 'Kah-fay Zhah-loo' },
-    { pattern: /\bHarry\s+Macklowe\b/gi, replacement: 'Harry Mack-low' },
-    { pattern: /\bHildreth\s+Meière\b/gi, replacement: 'Hil-dreth Mee-air' },
-    { pattern: /\bAugsburg\s+oak\b/gi, replacement: 'Awgs-berg oak' },
-    { pattern: /\bPoliform-Varenna\b/gi, replacement: 'Pol-ee-form Vah-ren-nuh' },
-    { pattern: /\bVarenna\b/gi, replacement: 'Vah-ren-nuh' },
-    { pattern: /\bBavarian\s+Spessart\s+oak\b/gi, replacement: 'Bavarian Shpeh-sart oak' },
-    { pattern: /\bCaesarstone\s+Pietra\s+Grey\b/gi, replacement: 'See-zer-stone Pee-eh-truh Grey' },
-    { pattern: /\bPerlado\s+Beige\b/gi, replacement: 'Pair-lah-do Beige' },
-    { pattern: /\bAzul\s+Grey\b/gi, replacement: 'Ah-zool Grey' },
-    { pattern: /\bFaber\b/gi, replacement: 'Fay-ber' },
-    { pattern: /\bAriston\b/gi, replacement: 'Ah-ris-ton' },
-    { pattern: /\bRafael\s+de\s+Cárdenas\b/gi, replacement: 'Rah-fah-el de Car-deh-nahs' },
-    { pattern: /\bCalacatta\s+Vagli\b/gi, replacement: 'Kah-lah-kah-tah Val-yee' },
-    { pattern: /\bDidimon\s+Light\b/gi, replacement: 'Did-ee-mon Light' },
-    { pattern: /\bDidimon\b/gi, replacement: 'Did-ee-mon Light' },
-    { pattern: /\bEl\s+Ad\s+East\s+74\b/gi, replacement: 'El Ad East seventy-four' },
-    { pattern: /\bSiematic\b/gi, replacement: 'See-matic' },
-    { pattern: /\bSieMatic\b/gi, replacement: 'See-matic' },
-    { pattern: /\bCompaq\b/gi, replacement: 'Kom-pak' },
-    { pattern: /\bCL-OTH\s+Interiors\b/gi, replacement: 'Cloth Interiors' },
-    { pattern: /\bFulgor\s+Milano\b/gi, replacement: 'Fool-gor Mee-lah-no' },
-    { pattern: /\bSchiffini\b/gi, replacement: 'Shee-fee-nee' },
-    { pattern: /\bNeptune\s+Zen\b/gi, replacement: 'Neptune Zen' },
-    { pattern: /\bNoir\s+St\.\s+Laurent\b/gi, replacement: 'Nwahr San Law-rahn' },
-    { pattern: /\bAgata\s+&\s+Valentina\b/gi, replacement: 'Ah-gah-tah and Val-en-tee-nah' },
-    { pattern: /\bRimadesio\b/gi, replacement: 'Ree-mah-day-zyoh' },
-    { pattern: /\bValcucine\b/gi, replacement: 'Val-coo-chee-nay' },
-    { pattern: /\bNeil\s+Denari\b/gi, replacement: 'Neil Deh-nah-ree' },
-    { pattern: /\bRIVAA\s+Gallery\b/gi, replacement: 'Ree-vah Gallery' },
-    { pattern: /\bGronenberg\s+and\s+Leuchtag\b/gi, replacement: 'Grow-nen-berg and Loyk-tag' },
-    { pattern: /\bLaGuardia\s+Design\s+Group\b/gi, replacement: 'Lah-gward-ee-ah Design Group' },
-    { pattern: /\bCeppo\s+Bianco\b/gi, replacement: 'Cheh-poe Bee-ahn-koe' },
-    { pattern: /\bDormakaba\b/gi, replacement: 'Dor-mah-kah-bah' },
-    { pattern: /\bBirley\s+Bakery\b/gi, replacement: 'Bur-lee Bakery' },
-    { pattern: /\bLe\s+Charlot\b/gi, replacement: 'Luh Shar-low' },
-    { pattern: /\bMarcel’s\b/gi, replacement: 'Mar-sellz' },
-    { pattern: /\bDaino\s+Reale\b/gi, replacement: 'Dye-noe Ray-ah-lay' },
-    { pattern: /\bIngrao\s+Inc\.\b/gi, replacement: 'In-gray-oh Incorporated' },
-    { pattern: /\bOrnare\b/gi, replacement: 'Or-nah-ray' },
-    { pattern: /\bSchwartz\s+&\s+Gross\b/gi, replacement: 'Shwartz and Grose' },
-    { pattern: /\bLazza\b/gi, replacement: 'Laht-sah' },
-    { pattern: /\bReuveni\s+LLC\b/gi, replacement: 'Reh-oo-ven-ee L-L-C' },
-    { pattern: /\bHotel\s+des\s+Artistes\b/gi, replacement: 'Hotel dayz Ar-teest' },
-    { pattern: /\bLa\s+Cornue\b/gi, replacement: 'Lah Cor-noo' },
-    { pattern: /\bSabrina\s+Condominium\b/gi, replacement: 'Suh-bree-nuh Condominium' },
-    { pattern: /\bSabrina\b/gi, replacement: 'Suh-bree-nuh Condominium' },
-    { pattern: /\bCovelano\s+marble\b/gi, replacement: 'Koe-veh-lah-noe marble' },
-    { pattern: /\bAnish\s+Kapoor\b/gi, replacement: 'Ah-neesh Kah-poor' },
-    { pattern: /\bAntonio\s+Lupi\b/gi, replacement: 'An-toe-nee-oh Loo-pee' },
-    { pattern: /\bDeLemos\s+&\s+Cordes\b/gi, replacement: 'Deh-Lee-mose and Kor-deez' }
-];
-
 const acronymReplacements = [
     { pattern: /\bSTAR\b/g, replacement: 'Star' },
     { pattern: /\bPILOT\b/g, replacement: 'Pilot' },
@@ -350,22 +193,31 @@ const acronymReplacements = [
 ];
 
 /**
- * Main cleanTextForTTS function.
- * Pre-processes text for TTS vocalization using a 7-stage sequential pipeline.
- * Returns null if the text contains boilerplate and should be skipped.
+ * Unified helper that runs the entire cleaning pipeline, recording highlight candidates as tokens.
  */
-function cleanTextForTTS(rawText) {
-    if (!rawText) return '';
+function cleanTextForTTSWithTokens(rawText) {
+    if (!rawText) return { textWithTokens: '', highlights: [] };
     let t = rawText;
 
-    // ==========================================
-    // STAGE 1: Safety Check & Early Normalizations
-    // ==========================================
-    
     // Safety check: Offering plan/Sponsor disclosures
     const boilerplateRisk = /offering plan|offering terms|equal housing|file no\.|file number|\bsponsor(?:\s*:|\s+is|\s+makes|\s+reverses|\s+available\s+from)/i;
     if (boilerplateRisk.test(t)) {
-        return null; // Skip execution context
+        return { textWithTokens: null, highlights: [] };
+    }
+
+    // Delete everything inside parentheses, including the parentheses
+    t = t.replace(/\s*\([^)]*\)/g, '');
+
+    const highlights = [];
+    let hlCounter = 0;
+
+    function addHighlight(original, converted) {
+        let cleanConverted = converted
+            .replace(/\bft\b/gi, 'foot')
+            .replace(/\bsf\b/gi, 'square feet');
+        const token = `__HL_${hlCounter++}__`;
+        highlights.push({ token, original: original.trim(), converted: cleanConverted.trim() });
+        return token;
     }
 
     // Clean zero-width space characters early
@@ -570,36 +422,64 @@ function cleanTextForTTS(rawText) {
         } else {
             baWord = convertNumberToWords(ba) + ' bath';
         }
-        return `${brWord}, ${baWord}`;
+        const converted = `${brWord}, ${baWord}`;
+        return addHighlight(match, converted);
     });
 
     // Address House Number conversions
     const streetSuffixes = '(?:Street|Avenue|Road|Place|Boulevard|St\\.?|Ave\\.?|Rd\\.?|Pl\\.?|Blvd\\.?|Plaza|Loop|Drive|Dr\\.?)';
     const directions = '(?:East|West|North|South|E\\.?|W\\.?|N\\.?|S\\.?)';
-    
+
+    // Address House Number Ranges (e.g. 159-161 Bleecker Street, 155-157 East 49th Street)
+    const addrRangePattern = new RegExp(`\\b(\\d{3,4})\\s*-\\s*(\\d{3,4})\\s+(?:(${directions})\\s+)?(?:(\\d+(?:st|nd|rd|th)?)|([A-Z][a-zA-Z]+(?:\\s+[A-Z][a-zA-Z]+)*))\\s+(${streetSuffixes})\\b`, 'gi');
+    t = t.replace(addrRangePattern, (match, num1, num2, dir, streetNum, streetName, suffix) => {
+        const h1 = convertHouseNumber(num1);
+        const h2 = convertHouseNumber(num2);
+        const d = dir ? dir + ' ' : '';
+        let st = '';
+        if (streetNum) {
+            st = convertStreetNumber(streetNum.replace(/(st|nd|rd|th)$/i, '')) + ' ';
+        } else {
+            st = streetName + ' ';
+        }
+        const converted = `${h1} to ${h2} ${d}${st}${suffix}`;
+        return addHighlight(match, converted);
+    });
+
     // Numbered Street/Avenue Addresses (e.g. 155 East 49th Street)
     const addrPattern1 = new RegExp(`\\b(\\d{3,4})\\s+(${directions})\\s+(\\d+(?:st|nd|rd|th)?)\\s+(${streetSuffixes})\\b`, 'gi');
     t = t.replace(addrPattern1, (match, houseNum, dir, streetNum, suffix) => {
-        return `${convertHouseNumber(houseNum)} ${dir} ${streetNum} ${suffix}`;
+        const cleanStreet = convertStreetNumber(streetNum.replace(/(st|nd|rd|th)$/i, ''));
+        const converted = `${convertHouseNumber(houseNum)} ${dir} ${cleanStreet} ${suffix}`;
+        return addHighlight(match, converted);
     });
-    
+
     // Named Street Addresses with Direction (e.g. 870 West End Avenue)
     const addrPattern2 = new RegExp(`\\b(\\d{3,4})\\s+(${directions})\\s+([A-Z][a-zA-Z]+(?:\\s+[A-Z][a-zA-Z]+)*)\\s+(${streetSuffixes})\\b`, 'g');
     t = t.replace(addrPattern2, (match, houseNum, dir, streetName, suffix) => {
-        return `${convertHouseNumber(houseNum)} ${dir} ${streetName} ${suffix}`;
+        const converted = `${convertHouseNumber(houseNum)} ${dir} ${streetName} ${suffix}`;
+        return addHighlight(match, converted);
     });
-    
+
     // Named Street Addresses without Direction (e.g. 1420 York Avenue, 870 United Nations Plaza)
     const addrPattern3 = new RegExp(`\\b(\\d{3,4})\\s+([A-Z][a-zA-Z]+(?:\\s+[A-Z][a-zA-Z]+)*)\\s+(${streetSuffixes})\\b`, 'g');
     t = t.replace(addrPattern3, (match, houseNum, streetName, suffix) => {
-        return `${convertHouseNumber(houseNum)} ${streetName} ${suffix}`;
+        const converted = `${convertHouseNumber(houseNum)} ${streetName} ${suffix}`;
+        return addHighlight(match, converted);
+    });
+
+    // Standalone Numbered Streets (e.g. 110th Street, 49th Avenue, 110 Street)
+    const streetPattern = new RegExp(`\\b(\\d+)(st|nd|rd|th)?\\s+(${streetSuffixes})\\b`, 'gi');
+    t = t.replace(streetPattern, (match, streetNum, ord, suffix) => {
+        const converted = `${convertStreetNumber(streetNum)} ${suffix}`;
+        return addHighlight(match, converted);
     });
 
     // Expand Penthouse configurations cleanly (e.g., PH6A -> Penthouse Six A)
-    t = t.replace(/\bPH(\d+)([A-Za-z]?)\b/gi, (m, num, letter) => {
+    t = t.replace(/\bPH(\d+)([A-Za-z]?)\b/gi, (match, num, letter) => {
         let spoken = 'Penthouse ' + convertNumberToWords(num);
         if (letter) spoken += ' ' + letter.toUpperCase();
-        return spoken;
+        return addHighlight(match, spoken);
     });
 
     // ==========================================
@@ -613,62 +493,95 @@ function cleanTextForTTS(rawText) {
     // Dimensions "by" replacement on raw digits/symbols (e.g. 51' x 26' -> 51' by 26')
     t = t.replace(/(\d+(?:\.\d+)?(?:\s*['"”]|ft|feet|in|inches)?)\s*[xX×]\s*(\d+(?:\.\d+)?)/g, '$1 by $2');
 
+    // Hyphenated dimension pairs (e.g. 11-6 x 10-0 or 11-6 by 10-0)
+    t = t.replace(/\b(\d+)-(\d+)\s*(?:by|[xX×])\s*(\d+)-(\d+)\b/g, (match, ft1, in1, ft2, in2, offset) => {
+        const isCeiling = isCeilingContext(t, match, offset);
+        const converted = `${formatDimension(ft1, in1, isCeiling)} by ${formatDimension(ft2, in2, isCeiling)}`;
+        return addHighlight(match, converted);
+    });
+
+    // Standalone hyphenated dimension (e.g. 11-6 feet / 11-6 ceiling)
+    t = t.replace(/\b(\d+)-(\d+)\s*(?:feet|foot|ft|wide|long|high|ceiling)\b/gi, (match, ftStr, inchStr, offset) => {
+        const isCeiling = match.toLowerCase().includes('ceiling') || isCeilingContext(t, match, offset);
+        const converted = formatDimension(ftStr, inchStr, isCeiling);
+        return addHighlight(match, converted);
+    });
+
     // Matches feet and inches format: e.g. 16'1" or 16'10"
-    t = t.replace(/(\d+(?:\.\d+)?)\s*'\s*(\d+(?:\.\d+)?)(?:"|inches?|inch)?/gi, (match, ft, inch) => {
+    t = t.replace(/(\d+(?:\.\d+)?)\s*'\s*(\d+(?:\.\d+)?)(?:"|inches?|inch)?/gi, (match, ft, inch, offset) => {
         const ftNum = parseFloat(ft);
         const inchNum = parseFloat(inch);
-        const ftUnit = ftNum === 1 ? 'foot' : 'feet';
-        const inchUnit = inchNum === 1 ? 'inch' : 'inches';
+        const isCeiling = isCeilingContext(t, match, offset);
+        const ftUnit = isCeiling ? 'foot' : (ftNum === 1 ? 'foot' : 'feet');
+        const inchUnit = isCeiling ? 'inch' : (inchNum === 1 ? 'inch' : 'inches');
         const ftWords = ft.endsWith('.5') ? `${convertNumberToWords(Math.floor(ftNum))} and a half` : convertNumberToWords(ft);
         const inchWords = inch.endsWith('.5') ? `${convertNumberToWords(Math.floor(inchNum))} and a half` : convertNumberToWords(inch);
-        return `${ftWords} ${ftUnit} ${inchWords} ${inchUnit}`;
+        const converted = `${ftWords} ${ftUnit} ${inchWords} ${inchUnit}`;
+        return addHighlight(match, converted);
     });
 
     // Matches standalone foot tags like 21' WIDE or 102' lot
-    t = t.replace(/(\d+(?:\.\d+)?)\s*'/g, (match, ft) => {
+    t = t.replace(/(\d+(?:\.\d+)?)\s*'/g, (match, ft, offset) => {
         const ftNum = parseFloat(ft);
-        const unit = ftNum === 1 ? 'foot' : 'feet';
+        const isCeiling = isCeilingContext(t, match, offset);
+        const unit = isCeiling ? 'foot' : (ftNum === 1 ? 'foot' : 'feet');
+        let converted = '';
         if (ft.endsWith('.5')) {
             const baseWords = convertNumberToWords(Math.floor(ftNum));
-            return `${baseWords} and a half feet`;
+            converted = `${baseWords} ${unit} six inches`;
+        } else {
+            converted = `${convertNumberToWords(ft)} ${unit}`;
         }
-        return `${convertNumberToWords(ft)} ${unit}`;
+        return addHighlight(match, converted);
     });
 
     // Matches standalone inch tags like 48" range
-    t = t.replace(/(\d+(?:\.\d+)?)\s*"/g, (match, inch) => {
+    t = t.replace(/(\d+(?:\.\d+)?)\s*"/g, (match, inch, offset) => {
         const inchNum = parseFloat(inch);
-        const unit = inchNum === 1 ? 'inch' : 'inches';
+        const isCeiling = isCeilingContext(t, match, offset);
+        const unit = isCeiling ? 'inch' : (inchNum === 1 ? 'inch' : 'inches');
+        let converted = '';
         if (inch.endsWith('.5')) {
             const baseWords = convertNumberToWords(Math.floor(inchNum));
-            return `${baseWords} and a half inches`;
+            converted = `${baseWords} and a half inches`;
+        } else {
+            converted = `${convertNumberToWords(inch)} ${unit}`;
         }
-        return `${convertNumberToWords(inch)} ${unit}`;
+        return addHighlight(match, converted);
     });
 
     // Unit-aware square feet expansion
-    t = t.replace(/\b([0-9,.]+)\s*(?:-|–)?\s*(sf|sq\.?\s*ft\b\.?|sqft\b|square\s*feet|Squareft)\b/gi, (match, num, unit) => {
-        const cleanNum = num.replace(/,/g, '');
-        return convertNumberToWords(cleanNum) + ' square feet';
+    t = t.replace(/\b([0-9]+(?:\s+[0-9]+)*|([0-9,.]+))\s*(?:-|–)?\s*(sf|sq\.?\s*ft\b\.?|sqft\b|square\s*feet|Squareft)\b/gi, (match, num, p2, unit) => {
+        const cleanNum = num.replace(/[\s,]+/g, '');
+        const converted = convertNumberToWords(cleanNum) + ' square feet';
+        return addHighlight(match, converted);
     });
 
     // Per Square Foot Suffixes ($741/ft²)
-    t = t.replace(/\/(?:ft²|sq\.?\s*ft\b\.?|sqft\b)/gi, ' per square foot');
+    t = t.replace(/\/(?:ft²|sq\.?\s*ft\b\.?|sqft\b)/gi, (match) => {
+        return addHighlight(match, ' per square foot');
+    });
 
     // Standard sq. ft. abbreviation expansion (when not preceded by a slash)
-    t = t.replace(/\b(?:sq\.?\s*ft\b\.?|sqft\b)/gi, 'square feet');
+    t = t.replace(/\b(?:sq\.?\s*ft\b\.?|sqft\b)/gi, (match) => {
+        return addHighlight(match, 'square feet');
+    });
 
     // Sq -> Square (done late to avoid breaking sq.ft. matches)
     t = t.replace(/\bSq\b/g, 'Square').replace(/\bsq\b/g, 'square');
-    
+
     // FT -> Feet (done late to avoid breaking ft matches)
-    t = t.replace(/\bFT\b/g, 'Feet').replace(/\bft\b/g, 'feet');
+    t = t.replace(/\bFT\b/g, 'foot').replace(/\bft\b/g, 'foot');
 
     // Specific Fractions
-    t = t.replace(/\b(\d+)\s+1\/2\b/g, (m, num) => `${convertNumberToWords(num)} and a half`);
-    t = t.replace(/\b1\/2\b/g, 'a half');
-    t = t.replace(/\b(\d+)\s+1\/4\b/g, (m, num) => `${convertNumberToWords(num)} and a quarter`);
-    t = t.replace(/\b1\/4\b/g, 'a quarter');
+    t = t.replace(/\b(\d+)\s+1\/2\b/g, (match, num) => {
+        return addHighlight(match, `${convertNumberToWords(num)} and a half`);
+    });
+    t = t.replace(/\b1\/2\b/g, (match) => addHighlight(match, 'a half'));
+    t = t.replace(/\b(\d+)\s+1\/4\b/g, (match, num) => {
+        return addHighlight(match, `${convertNumberToWords(num)} and a quarter`);
+    });
+    t = t.replace(/\b1\/4\b/g, (match) => addHighlight(match, 'a quarter'));
 
     // ==========================================
     // STAGE 6: Phonetic Brand / Designer / Material Dictionary & Preserved Acronyms
@@ -700,7 +613,7 @@ function cleanTextForTTS(rawText) {
     // AV -> audio visual
     t = t.replace(/\bAV\b/gi, 'audio visual');
 
-    // Generic CamelCase splitting for remaining merged words (run after brand phonetics to avoid breaking brand names, narrowed to standard patterns)
+    // Generic CamelCase splitting for remaining merged words
     t = t.replace(/\b([A-Z]?[a-z]+)([A-Z][a-z]+)\b/g, '$1 $2');
 
     // ==========================================
@@ -713,15 +626,17 @@ function cleanTextForTTS(rawText) {
     // Handle millions ranges first, e.g. $1.275M or $1.2M
     t = t.replace(/\$([0-9.]+)\s*(M|m)\b/g, (match, val) => {
         const numVal = parseFloat(val) * 1000000;
-        return convertNumberToWords(numVal) + " dollars";
+        const converted = convertNumberToWords(numVal) + " dollars";
+        return addHighlight(match, converted);
     });
     // Handle billions
     t = t.replace(/\$([0-9.]+)\s*(B|b)\b/g, (match, val) => {
         const numVal = parseFloat(val) * 1000000000;
-        return convertNumberToWords(numVal) + " dollars";
+        const converted = convertNumberToWords(numVal) + " dollars";
+        return addHighlight(match, converted);
     });
-    
-    // Handle standard numeric currency figures with commas ($360,000,000 or $360,000)
+
+    // Handle standard currency figures
     t = t.replace(/\$([0-9]+(?:,[0-9]+)*)(\.[0-9]{2})?/g, (match, val, cents) => {
         const cleanNum = val.replace(/,/g, '');
         let spoken = convertNumberToWords(cleanNum) + " dollars";
@@ -731,116 +646,306 @@ function cleanTextForTTS(rawText) {
                 spoken += " and " + convertNumberToWords(centVal) + " cents";
             }
         }
-        return spoken;
+        return addHighlight(match, spoken);
     });
 
-    // Convert decimal .5 baths to "and a half" (e.g. 4.5 bathrooms -> four and a half bathrooms)
+    // Convert decimal bathrooms
     t = t.replace(/\b(\d+)\.5\s*(baths?|bathrooms?)\b/gi, (match, num, unit) => {
         const words = convertNumberToWords(num);
-        return `${words} and a half ${unit}`;
+        const converted = `${words} and a half ${unit}`;
+        return addHighlight(match, converted);
     });
 
-    // Pre-process large round numbers >= 1,000,000 ending in zeros to millions notation (without currency prefix)
+    // Large round numbers
     t = t.replace(/\b\d{1,3}(,\d{3})+(\.\d+)?\b/g, (match) => {
         const cleanNum = match.replace(/,/g, '');
         const valFloat = parseFloat(cleanNum);
+        let converted = '';
         if (!isNaN(valFloat) && valFloat >= 1000000 && valFloat % 10000 === 0) {
             const millions = valFloat / 1000000;
-            return convertNumberToWords(millions) + ' million';
+            converted = convertNumberToWords(millions) + ' million';
+        } else {
+            converted = convertNumberToWords(cleanNum);
         }
-        return convertNumberToWords(cleanNum);
+        return addHighlight(match, converted);
     });
 
-    // Pre-process standalone decimals (e.g. 1.5 or 2.5)
+    // Standalone decimals
     t = t.replace(/\b\d+\.\d+\b/g, (match) => {
-        return convertNumberToWords(match);
+        const converted = convertNumberToWords(match);
+        return addHighlight(match, converted);
     });
 
-    // Convert decade and plural numbers (e.g. 60s -> sixties, 1920s -> nineteen twenties)
+    // Decade and plural numbers
     t = t.replace(/\b(\d{2,4})s\b/g, (match, digitStr) => {
         const val = parseInt(digitStr, 10);
-        if (val === 60) return 'sixties';
-        if (val === 70) return 'seventies';
-        if (val === 80) return 'eighties';
-        if (val === 90) return 'nineties';
-        if (val === 20) return 'twenties';
-        if (val === 30) return 'thirties';
-        if (val === 40) return 'forties';
-        if (val === 50) return 'fifties';
-        if (val >= 1800 && val <= 2099 && val % 10 === 0) {
+        let converted = match;
+        if (val === 60) converted = 'sixties';
+        else if (val === 70) converted = 'seventies';
+        else if (val === 80) converted = 'eighties';
+        else if (val === 90) converted = 'nineties';
+        else if (val === 20) converted = 'twenties';
+        else if (val === 30) converted = 'thirties';
+        else if (val === 40) converted = 'forties';
+        else if (val === 50) converted = 'fifties';
+        else if (val >= 1800 && val <= 2099 && val % 10 === 0) {
             const baseWords = convertYearToWords(val.toString());
-            return baseWords.replace(/\btwenty\b/g, 'twenties')
-                            .replace(/\bthirty\b/g, 'thirties')
-                            .replace(/\bforty\b/g, 'forties')
-                            .replace(/\bfifty\b/g, 'fifties')
-                            .replace(/\bsixty\b/g, 'sixties')
-                            .replace(/\bseventy\b/g, 'seventies')
-                            .replace(/\beighty\b/g, 'eighties')
-                            .replace(/\bninety\b/g, 'nineties');
+            converted = baseWords.replace(/\btwenty\b/g, 'twenties')
+                .replace(/\bthirty\b/g, 'thirties')
+                .replace(/\bforty\b/g, 'forties')
+                .replace(/\bfifty\b/g, 'fifties')
+                .replace(/\bsixty\b/g, 'sixties')
+                .replace(/\bseventy\b/g, 'seventies')
+                .replace(/\beighty\b/g, 'eighties')
+                .replace(/\bninety\b/g, 'nineties');
         }
-        return match;
+        return addHighlight(match, converted);
     });
 
-    // Standard year translation: four-digit numbers from 1800 to 2099
-    t = t.replace(/\b(18|19|20)\d{2}\b/g, (match) => convertYearToWords(match));
+    // Standard year translation
+    t = t.replace(/\b(18|19|20)\d{2}\b/g, (match) => {
+        const converted = convertYearToWords(match);
+        return addHighlight(match, converted);
+    });
 
-    // Standalone ordinals (e.g. 3rd -> third)
-    t = t.replace(/\b(\d+)(st|nd|rd|th)\b/gi, (m, num) => ordinalToWords(num));
+    // Standalone ordinals
+    t = t.replace(/\b(\d+)(st|nd|rd|th)\b/gi, (match, num) => {
+        const converted = ordinalToWords(num);
+        return addHighlight(match, converted);
+    });
 
     // Remaining standalone integers
-    t = t.replace(/\b\d+\b/g, (num) => convertNumberToWords(num));
-
-    // Handle alphanumeric number conversions (e.g. One57 -> One fifty seven, R10 -> R ten, 71A -> seventy one A)
-    t = t.replace(/\b([Oo]ne)(\d+)([']s)?\b/g, (m, word, num, possessive) => {
-        return `${word} ${convertNumberToWords(num)}${possessive || ''}`;
-    });
-    t = t.replace(/([a-zA-Z])(\d+)/g, (m, letter, num) => `${letter} ${convertNumberToWords(num)}`);
-    t = t.replace(/(\d+)([a-zA-Z]+)/g, (m, num, letter) => {
-        if (/^(?:st|nd|rd|th)$/i.test(letter)) return m;
-        return `${convertNumberToWords(num)} ${letter}`;
+    t = t.replace(/\b\d+\b/g, (match) => {
+        const converted = convertNumberToWords(match);
+        return addHighlight(match, converted);
     });
 
-    // Final unit adjustments for splayed alphanumeric units (e.g. thirty ft -> thirty feet)
-    t = t.replace(/\bft\b/g, 'feet');
+    // Alphanumeric number conversions
+    t = t.replace(/\b([Oo]ne)(\d+)([']s)?\b/g, (match, word, num, possessive) => {
+        const converted = `${word} ${convertNumberToWords(num)}${possessive || ''}`;
+        return addHighlight(match, converted);
+    });
+    t = t.replace(/([a-zA-Z])(\d+)/g, (match, letter, num) => {
+        const converted = `${letter} ${convertNumberToWords(num)}`;
+        return addHighlight(match, converted);
+    });
+    t = t.replace(/(\d+)([a-zA-Z]+)/g, (match, num, letter) => {
+        if (/^(?:st|nd|rd|th)$/i.test(letter)) return match;
+        const converted = `${convertNumberToWords(num)} ${letter}`;
+        return addHighlight(match, converted);
+    });
+
+    // Final unit adjustments
+    t = t.replace(/\bft\b/g, 'foot');
     t = t.replace(/\bsf\b/g, 'square feet');
 
-    // Clean up slashes between words/numbers (e.g. room/gallery -> room and gallery, C1-9/R10 -> C1-9 and R10)
+    // Clean up slashes between words/numbers
     t = t.replace(/\b([a-zA-Z0-9-]+)\s*\/\s*\b([a-zA-Z0-9-]+)\b/g, '$1 and $2');
     t = t.replace(/\b([a-zA-Z0-9-]+)\s*\/\s*\b([a-zA-Z0-9-]+)\b/g, '$1 and $2');
 
-    // Replace pipe symbols with a comma to add structural pauses
+    // Replace pipe symbols
     t = t.replace(/\s*\|\s*/g, ', ');
 
-    // Clean up multiple periods, e.g. "..." or ".." -> "."
+    // Clean up multiple periods
     t = t.replace(/\.{2,}/g, '.');
 
-    // Remove commas before 'and' to prevent double pauses in TTS audio
+    // Remove commas before 'and'
     t = t.replace(/,\s*and\b/gi, ' and');
 
-    // Clean up duplicate commas, e.g. ",," -> ","
+    // Clean up duplicate commas
     t = t.replace(/,\s*,/g, ',');
 
-    // Standardize spacing around commas and semicolons (preserve breathing pauses)
+    // Standardize spacing around commas/semicolons
     t = t.replace(/\s*,\s*/g, ', ');
     t = t.replace(/\s*;\s*/g, '; ');
 
-    // Clean up period-comma or comma-period relics left by replacements
+    // Clean up period-comma or comma-period relics
     t = t.replace(/\.,/g, ', ');
     t = t.replace(/,\./g, '.');
 
-    // Ensure space after sentence-ending punctuation followed by a letter, and capitalize it
+    // Ensure space after sentence-ending punctuation
     t = t.replace(/([.!?])([a-zA-Z])/g, (match, punc, letter) => `${punc} ${letter.toUpperCase()}`);
 
     // Clean up space before sentence-ending punctuation
     t = t.replace(/\s+([.!?])/g, '$1');
 
-    t = t.replace(/[\t\r\n]+/g, ' '); // Flatten structural formatting breaks
-    t = t.replace(/\s+/g, ' ');        // Condense spaces
+    t = t.replace(/[\t\r\n]+/g, ' ');
+    t = t.replace(/\s+/g, ' ');
 
-    // Capitalize the first letter of each sentence
+    // Capitalize first letter of each sentence
     t = t.replace(/(^\s*|[.!?]\s+)([a-z])/g, (match, prefix, char) => prefix + char.toUpperCase());
 
-    return t.trim();
+    return { textWithTokens: t.trim(), highlights };
+}
+
+/**
+ * Main cleanTextForTTS function.
+ * Pre-processes text for TTS vocalization using a 7-stage sequential pipeline.
+ * Returns null if the text contains boilerplate and should be skipped.
+ */
+function cleanTextForTTS(rawText) {
+    const { textWithTokens, highlights } = cleanTextForTTSWithTokens(rawText);
+    if (textWithTokens === null) return null;
+    let plain = textWithTokens;
+    // Replace tokens from last to first to handle double-digit token indices correctly if any match nesting happens
+    highlights.slice().reverse().forEach(hl => {
+        plain = plain.replace(hl.token, hl.converted);
+    });
+    return plain;
+}
+
+/**
+ * Main cleanTextForTTSWithHighlight function.
+ * Pre-processes text for TTS vocalization and returns HTML-formatted string with highlights.
+ */
+function cleanTextForTTSWithHighlight(rawText) {
+    const { textWithTokens, highlights } = cleanTextForTTSWithTokens(rawText);
+    if (textWithTokens === null) return null;
+    let html = textWithTokens;
+    highlights.slice().reverse().forEach(hl => {
+        html = html.replace(hl.token, `<span style="color: #0000ff; font-weight: bold;">${hl.converted} {${hl.original}}</span>`);
+    });
+    return html;
+}
+
+/**
+ * Processes, cleans, and truncates raw text, returning both plain and HTML versions.
+ */
+function cleanAndTruncateTTS(rawText) {
+    const { textWithTokens, highlights } = cleanTextForTTSWithTokens(rawText);
+    if (textWithTokens === null) {
+        return { plain: null, html: null };
+    }
+
+    // Build the segments array
+    const segments = [];
+    let lastIndex = 0;
+    const tokenRegex = /__HL_(\d+)__/g;
+    let match;
+    while ((match = tokenRegex.exec(textWithTokens)) !== null) {
+        if (match.index > lastIndex) {
+            segments.push({
+                type: 'text',
+                content: textWithTokens.substring(lastIndex, match.index)
+            });
+        }
+        const hlIndex = parseInt(match[1], 10);
+        segments.push({
+            type: 'highlight',
+            hl: highlights[hlIndex]
+        });
+        lastIndex = tokenRegex.lastIndex;
+    }
+    if (lastIndex < textWithTokens.length) {
+        segments.push({
+            type: 'text',
+            content: textWithTokens.substring(lastIndex)
+        });
+    }
+
+    // Construct the full plain text
+    const plainText = segments.map(s => s.type === 'text' ? s.content : s.hl.converted).join('');
+
+    // Perform truncation logic on the plain text to find the suffix limit
+    let targetTextPlain = '';
+    let prefixLength = plainText.length;
+    let needsFallbackPeriod = false;
+
+    const words = plainText.split(/\s+/).filter(w => w.length > 0);
+    if (words.length <= 150) {
+        targetTextPlain = plainText;
+        prefixLength = plainText.length;
+    } else {
+        const windowWords = words.slice(0, 172);
+        const windowText = windowWords.join(' ');
+
+        const lastPuncIndex = Math.max(
+            windowText.lastIndexOf('.'),
+            windowText.lastIndexOf('!'),
+            windowText.lastIndexOf('?')
+        );
+
+        if (lastPuncIndex !== -1) {
+            targetTextPlain = windowText.substring(0, lastPuncIndex + 1).trim();
+            const cleanTargetSig = targetTextPlain.replace(/\s+/g, '');
+            let plainTextIdx = 0;
+            let targetIdx = 0;
+            while (plainTextIdx < plainText.length && targetIdx < cleanTargetSig.length) {
+                if (plainText[plainTextIdx].replace(/\s/g, '') === cleanTargetSig[targetIdx]) {
+                    targetIdx++;
+                }
+                plainTextIdx++;
+            }
+            prefixLength = plainTextIdx;
+        } else {
+            targetTextPlain = words.slice(0, 150).join(' ') + '.';
+            const word150 = words.slice(0, 150).join(' ');
+            const cleanTargetSig = word150.replace(/\s+/g, '');
+            let plainTextIdx = 0;
+            let targetIdx = 0;
+            while (plainTextIdx < plainText.length && targetIdx < cleanTargetSig.length) {
+                if (plainText[plainTextIdx].replace(/\s/g, '') === cleanTargetSig[targetIdx]) {
+                    targetIdx++;
+                }
+                plainTextIdx++;
+            }
+            prefixLength = plainTextIdx;
+            needsFallbackPeriod = true;
+        }
+    }
+
+    // Slice segments to prefixLength
+    const slicedSegments = [];
+    let currentLength = 0;
+    for (const seg of segments) {
+        const segText = seg.type === 'text' ? seg.content : seg.hl.converted;
+        if (currentLength + segText.length <= prefixLength) {
+            slicedSegments.push(seg);
+            currentLength += segText.length;
+        } else {
+            const remaining = prefixLength - currentLength;
+            if (seg.type === 'text') {
+                slicedSegments.push({
+                    type: 'text',
+                    content: seg.content.substring(0, remaining)
+                });
+            } else {
+                slicedSegments.push({
+                    type: 'highlight',
+                    hl: {
+                        original: seg.hl.original,
+                        converted: seg.hl.converted.substring(0, remaining)
+                    }
+                });
+            }
+            break;
+        }
+    }
+
+    // If we need a fallback period, append it to the last segment of the sliced HTML/plain
+    if (needsFallbackPeriod && slicedSegments.length > 0) {
+        const lastSeg = slicedSegments[slicedSegments.length - 1];
+        if (lastSeg.type === 'text') {
+            lastSeg.content = lastSeg.content.trim() + '.';
+        } else {
+            slicedSegments.push({ type: 'text', content: '.' });
+        }
+    }
+
+    // Construct final truncated plain and HTML strings
+    const finalPlain = slicedSegments.map(s => s.type === 'text' ? s.content : s.hl.converted).join('').trim();
+    const finalHtml = slicedSegments.map(s => {
+        if (s.type === 'text') {
+            return s.content;
+        } else {
+            return `<span style="color: #0000ff; font-weight: bold;">${s.hl.converted} {${s.hl.original}}</span>`;
+        }
+    }).join('').trim();
+
+    return {
+        plain: finalPlain,
+        html: finalHtml
+    };
 }
 
 module.exports = {
@@ -848,5 +953,7 @@ module.exports = {
     convertYearToWords,
     convertHouseNumber,
     ordinalToWords,
-    cleanTextForTTS
+    cleanTextForTTS,
+    cleanTextForTTSWithHighlight,
+    cleanAndTruncateTTS
 };

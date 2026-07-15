@@ -2,7 +2,7 @@ require('dotenv').config();
 const mysql = require('mysql2/promise');
 const fs = require('fs');
 const path = require('path');
-const { cleanTextForTTS } = require('./text_sanitizer');
+const { cleanTextForTTS, cleanAndTruncateTTS } = require('./text_sanitizer');
 
 async function main() {
     console.log("================================================================================");
@@ -61,6 +61,7 @@ async function main() {
                 const promises = chunk.map(async (prop) => {
                     const rawText = prop.frontend_overview;
                     let targetText = 'SKIPPED_LEGAL_BOILERPLATE';
+                    let targetHtml = '';
                     let cleanedBeforeTruncation = '';
                     let rawWordCount = 0;
                     let cleanedWordCount = 0;
@@ -68,32 +69,14 @@ async function main() {
 
                     if (rawText && rawText !== 'null') {
                         rawWordCount = rawText.split(/\s+/).filter(w => w.length > 0).length;
-                        const cleaned = cleanTextForTTS(rawText);
+                        
+                        const res = cleanAndTruncateTTS(rawText);
 
-                        if (cleaned !== null) {
-                            cleanedBeforeTruncation = cleaned;
-                            cleanedWordCount = cleaned.split(/\s+/).filter(w => w.length > 0).length;
-
-                            // Perform truncation logic
-                            const words = cleaned.split(/\s+/).filter(w => w.length > 0);
-                            if (words.length <= 150) {
-                                targetText = cleaned;
-                            } else {
-                                const windowWords = words.slice(0, 172);
-                                const windowText = windowWords.join(' ');
-
-                                const lastPuncIndex = Math.max(
-                                    windowText.lastIndexOf('.'),
-                                    windowText.lastIndexOf('!'),
-                                    windowText.lastIndexOf('?')
-                                );
-
-                                if (lastPuncIndex !== -1) {
-                                    targetText = windowText.substring(0, lastPuncIndex + 1).trim();
-                                } else {
-                                    targetText = words.slice(0, 150).join(' ') + '.';
-                                }
-                            }
+                        if (res.plain !== null) {
+                            targetText = res.plain;
+                            targetHtml = res.html;
+                            cleanedBeforeTruncation = cleanTextForTTS(rawText);
+                            cleanedWordCount = cleanedBeforeTruncation.split(/\s+/).filter(w => w.length > 0).length;
                             finalWordCount = targetText.split(/\s+/).filter(w => w.length > 0).length;
                         } else {
                             skippedCount++;
@@ -122,6 +105,7 @@ async function main() {
                         `[RAW TEXT]:\n${loggedRaw}`,
                         `[CLEANED TEXT]:\n${loggedCleaned || '(SKIPPED/EMPTY)'}`,
                         `[FINAL TRUNCATED TEXT]:\n${targetText}`,
+                        `[FINAL TRUNCATED HTML]:\n${targetHtml}`,
                         "-".repeat(80),
                         ""
                     ].join('\n');
@@ -136,8 +120,8 @@ async function main() {
 
                     try {
                         await connection.execute(
-                            'UPDATE properties SET tts_clean_overview = ? WHERE id = ?',
-                            [targetText, prop.id]
+                            'UPDATE properties SET tts_clean_overview = ?, tts_clean_overview_html = ? WHERE id = ?',
+                            [targetText, targetHtml, prop.id]
                         );
                         processedCount++;
                     } catch (err) {
