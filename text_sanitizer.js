@@ -199,12 +199,6 @@ function cleanTextForTTSWithTokens(rawText) {
     if (!rawText) return { textWithTokens: '', highlights: [] };
     let t = rawText;
 
-    // Safety check: Offering plan/Sponsor disclosures
-    const boilerplateRisk = /offering plan|offering terms|equal housing|file no\.|file number|\bsponsor(?:\s*:|\s+is|\s+makes|\s+reverses|\s+available\s+from)/i;
-    if (boilerplateRisk.test(t)) {
-        return { textWithTokens: null, highlights: [] };
-    }
-
     // Delete everything inside parentheses, including the parentheses
     t = t.replace(/\s*\([^)]*\)/g, '');
 

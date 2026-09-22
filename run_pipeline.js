@@ -13,10 +13,17 @@ async function main() {
     const isReviewedOnly = process.argv.includes('--reviewed');
     const isVerbose = process.argv.includes('--verbose');
     
+    // Collect IDs passed after a `--reviewed` flag, e.g. `npm run pipeline --reviewed 462 683 3667`
+    const reviewedIds = process.argv
+        .slice(2)
+        .filter(a => a !== '--reviewed' && a !== '--verbose')
+        .map(Number)
+        .filter(n => !isNaN(n));
+
     const logFilePath = path.join(__dirname, 'pipeline_run.log');
     // Initialize log file
     fs.writeFileSync(logFilePath, `=== PIPELINE RUN LOG - ${new Date().toISOString()} ===\n`);
-    fs.appendFileSync(logFilePath, `Mode: ${isReviewedOnly ? 'TARGETED (15 REVIEWED IDs)' : 'ALL PUBLISHED PROPERTIES'} (Verbose: ${isVerbose})\n`);
+    fs.appendFileSync(logFilePath, `Mode: ${isReviewedOnly ? `TARGETED (${reviewedIds.length} REVIEWED IDS)` : 'NEW/UNCLEANED PUBLISHED PROPERTIES'} (Verbose: ${isVerbose})\n`);
     fs.appendFileSync(logFilePath, "=".repeat(80) + "\n\n");
 
     const connection = await mysql.createConnection({
@@ -29,14 +36,17 @@ async function main() {
 
     try {
         let query = '';
-        let targetIds = [3382, 4785, 2836, 469, 4914, 1986, 1784, 573, 1670, 5346, 1671, 3573, 6483, 4561, 6347];
 
         if (isReviewedOnly) {
-            console.log(`Running in TARGETED mode for the ${targetIds.length} reviewed property IDs.`);
-            query = `SELECT id, frontend_overview FROM properties WHERE id IN (${targetIds.join(',')})`;
+            if (reviewedIds.length === 0) {
+                console.error("No IDs provided after --reviewed. Pass IDs in the CLI, e.g.: node run_pipeline.js --reviewed 462 683 3667");
+                return;
+            }
+            console.log(`Running in TARGETED mode for the ${reviewedIds.length} reviewed property IDs.`);
+            query = `SELECT id, frontend_overview FROM properties WHERE id IN (${reviewedIds.join(',')})`;
         } else {
-            console.log("Running in FULL mode for all published properties.");
-            query = 'SELECT id, frontend_overview FROM properties WHERE is_published = 1';
+            console.log("Running in AUTO mode: cleaning every published property that doesn't have a tts_clean_overview yet.");
+            query = 'SELECT id, frontend_overview FROM properties WHERE is_published = 1 AND tts_clean_overview IS NULL';
         }
 
         const [properties] = await connection.query(query);
